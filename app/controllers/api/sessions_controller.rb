@@ -5,8 +5,9 @@ class Api::SessionsController < ApplicationController
 
   # POST /api/login {email, password}
   def create
-    user = User.find_by(email: params[:email].to_s.downcase.strip)
-    if user&.valid_password?(params[:password])
+    email, password = credentials_params
+    user = User.find_by(email: email)
+    if user&.valid_password?(password)
       render json: { token: mint_user_token(user), user: user_json(user) }
     else
       render json: { error: 'invalid credentials' }, status: :unauthorized
@@ -15,7 +16,8 @@ class Api::SessionsController < ApplicationController
 
   # POST /api/signup {email, password}
   def signup
-    user = User.new(email: params[:email].to_s.downcase.strip, password: params[:password])
+    email, password = credentials_params
+    user = User.new(email: email, password: password)
     if user.save
       render json: { token: mint_user_token(user), user: user_json(user) }, status: :created
     else
@@ -29,6 +31,13 @@ class Api::SessionsController < ApplicationController
   end
 
   private
+
+  def credentials_params
+    source = params[:user] || params[:session] || params
+    email = source[:email].to_s.downcase.strip
+    password = source[:password].to_s
+    [email, password]
+  end
 
   def mint_user_token(user)
     payload = {
