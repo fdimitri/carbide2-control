@@ -1,0 +1,78 @@
+{{- if .Values.rails.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "control-plane.fullname" . }}-rails
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rails
+spec:
+  replicas: {{ .Values.rails.replicas }}
+  selector:
+    matchLabels:
+      {{- include "control-plane.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: rails
+  template:
+    metadata:
+      labels:
+        {{- include "control-plane.labels" . | nindent 8 }}
+        app.kubernetes.io/component: rails
+    spec:
+      serviceAccountName: {{ include "control-plane.fullname" . }}-rails
+      initContainers:
+        - name: migrate
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [bash, -c, "bundle exec rails db:migrate && bundle exec rails db:seed"]
+          env:
+            - { name: RAILS_ENV, value: "{{ .Values.rails.env }}" }
+            - { name: POSTGRES_HOST,     value: "{{ .Values.postgres.clusterName }}-rw.{{ .Values.postgres.clusterNamespace }}.svc.cluster.local" }
+            - { name: POSTGRES_PORT,     value: "5432" }
+            - { name: POSTGRES_DB,       value: "{{ .Values.postgres.controlDatabaseName }}" }
+            - name: POSTGRES_USER
+              valueFrom: { secretKeyRef: { name: {{ .Values.postgres.credentialsSecret }}, key: username } }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ .Values.postgres.credentialsSecret }}, key: password } }
+      containers:
+        - name: rails
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [bundle, exec, rails, server, -b, "0.0.0.0", -p, "{{ .Values.rails.port }}"]
+          ports:
+            - { name: http, containerPort: {{ .Values.rails.port }} }
+          env:
+            - { name: RAILS_ENV,         value: "{{ .Values.rails.env }}" }
+            - { name: PORT,              value: "{{ .Values.rails.port }}" }
+            - { name: CONTROL_NAMESPACE, value: "{{ .Values.controlNamespace }}" }
+            - { name: PUBLIC_URL_BASE,   value: "{{ .Values.publicUrlBase }}" }
+            - { name: WORKSPACE_IMAGE,   value: "{{ .Values.workspace.image }}" }
+            - { name: WORKSPACE_IMAGE_TAG, value: "{{ .Values.workspace.imageTag }}" }
+            - { name: WORKSPACE_STORAGE_SIZE, value: "{{ .Values.workspace.storageSize }}" }
+            - { name: WORKSPACE_STORAGE_CLASS, value: "{{ .Values.workspace.storageClassName }}" }
+            - { name: WORKSPACE_SHELL_IMAGE, value: "{{ .Values.workspace.shellImage }}" }
+            - { name: INGRESS_PUBLIC_PORT, value: "{{ .Values.ingress.publicPort }}" }
+            - { name: RAILS_DEV_HOSTS,   value: "{{ .Values.rails.devHosts }}" }
+            - { name: PG_CLUSTER_NAME,        value: "{{ .Values.postgres.clusterName }}" }
+            - { name: PG_CLUSTER_NAMESPACE,   value: "{{ .Values.postgres.clusterNamespace }}" }
+            - { name: PG_CREDENTIALS_SECRET,  value: "{{ .Values.postgres.credentialsSecret }}" }
+            - { name: POSTGRES_HOST,     value: "{{ .Values.postgres.clusterName }}-rw.{{ .Values.postgres.clusterNamespace }}.svc.cluster.local" }
+            - { name: POSTGRES_PORT,     value: "5432" }
+            - { name: POSTGRES_DB,       value: "{{ .Values.postgres.controlDatabaseName }}" }
+            - name: POSTGRES_USER
+              valueFrom: { secretKeyRef: { name: {{ .Values.postgres.credentialsSecret }}, key: username } }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ .Values.postgres.credentialsSecret }}, key: password } }
+            - name: CARBIDE_JWT_SECRET
+              valueFrom: { secretKeyRef: { name: {{ .Values.jwt.secretName }}, key: secret } }
+          readinessProbe:
+            httpGet: { path: /up, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /up, port: http }
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.rails.resources | nindent 12 }}
+{{- end }}

@@ -1,0 +1,12 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: carbide-control
+  namespace: {{ .Values.postgres.clusterNamespace }}
+  labels:
+    {{- include "control-plane.labels" . | nindent 4 }}
+spec:
+  name: {{ .Values.postgres.controlDatabaseName }}
+  owner: app
+  cluster:
+    name: {{ .Values.postgres.clusterName }}

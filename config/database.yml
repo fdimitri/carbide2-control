@@ -1,0 +1,23 @@
+# Postgres connection. In-cluster the host is a CNPG -rw service; in dev,
+# whatever the env var points at. The control-plane DB is logically separate
+# from any workspace DB; both can live on the same Postgres cluster.
+default: &default
+  adapter: postgresql
+  encoding: unicode
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS", 5) %>
+  host:     <%= ENV.fetch("POSTGRES_HOST", "localhost") %>
+  port:     <%= ENV.fetch("POSTGRES_PORT", 5432) %>
+  username: <%= ENV.fetch("POSTGRES_USER", "carbide") %>
+  password: <%= ENV.fetch("POSTGRES_PASSWORD", "") %>
+
+development:
+  <<: *default
+  database: <%= ENV.fetch("POSTGRES_DB", "carbide_control_development") %>
+
+test:
+  <<: *default
+  database: <%= ENV.fetch("POSTGRES_DB_TEST", "carbide_control_test") %>
+
+production:
+  <<: *default
+  database: <%= ENV.fetch("POSTGRES_DB", "carbide_control_production") %>

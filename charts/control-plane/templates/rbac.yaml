@@ -1,0 +1,109 @@
+# Operator ServiceAccount + cluster-scoped RBAC.
+# This is intentionally broad — the operator is the ONLY thing in the cluster
+# with this much authority. The Rails ServiceAccount (separate, below) gets
+# only "create/get/list/watch/delete workspaces.carbide.dev".
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "control-plane.fullname" . }}-operator
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "control-plane.fullname" . }}-operator
+  labels:
+    {{- include "control-plane.labels" . | nindent 4 }}
+rules:
+  # Workspace CRD (the only thing it watches)
+  - apiGroups: ["carbide.dev"]
+    resources: [workspaces]
+    verbs: [get, list, watch, create, delete, patch, update]
+  - apiGroups: ["carbide.dev"]
+    resources: [workspaces/status]
+    verbs: [get, patch, update]
+
+  # Namespaces (creates one per workspace)
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, list, watch, create, delete, patch, update]
+
+  # Per-workspace core objects (created inside ws-* namespaces)
+  - apiGroups: [""]
+    resources: [services, persistentvolumeclaims, serviceaccounts, secrets, configmaps, pods]
+    verbs: [get, list, watch, create, delete, patch, update]
+
+  # Apps
+  - apiGroups: ["apps"]
+    resources: [deployments]
+    verbs: [get, list, watch, create, delete, patch, update]
+
+  # RBAC (creates per-workspace Role + RoleBinding)
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: [roles, rolebindings]
+    verbs: [get, list, watch, create, delete, patch, update]
+
+  # Traefik IngressRoute + Middleware
+  - apiGroups: ["traefik.io"]
+    resources: [ingressroutes, middlewares]
+    verbs: [get, list, watch, create, delete, patch, update]
+
+  # CloudNativePG Database CR
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: [databases]
+    verbs: [get, list, watch, create, delete, patch, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "control-plane.fullname" . }}-operator
+  labels:
+    {{- include "control-plane.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "control-plane.fullname" . }}-operator
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "control-plane.fullname" . }}-operator
+    namespace: {{ .Release.Namespace }}
+---
+# --- Rails: tiny narrow Role, only on the control namespace ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "control-plane.fullname" . }}-rails
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "control-plane.fullname" . }}-rails
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["carbide.dev"]
+    resources: [workspaces]
+    verbs: [get, list, watch, create, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "control-plane.fullname" . }}-rails
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "control-plane.fullname" . }}-rails
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "control-plane.fullname" . }}-rails
+    namespace: {{ .Release.Namespace }}

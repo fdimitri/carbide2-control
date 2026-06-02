@@ -1,0 +1,16 @@
+# Standard Rails gitignore + control-plane specifics.
+/.bundle
+/log/*
+!/log/.keep
+/tmp/*
+!/tmp/.keep
+/storage/*
+!/storage/.keep
+/db/*.sqlite3
+/db/*.sqlite3-*
+/.env
+/.env.*
+!/.env.example
+/coverage/
+/node_modules
+.DS_Store

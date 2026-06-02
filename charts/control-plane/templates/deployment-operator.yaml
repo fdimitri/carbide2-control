@@ -1,0 +1,37 @@
+{{- if .Values.operator.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "control-plane.fullname" . }}-operator
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+spec:
+  replicas: {{ .Values.operator.replicas }}
+  strategy: { type: Recreate }
+  selector:
+    matchLabels:
+      {{- include "control-plane.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: operator
+  template:
+    metadata:
+      labels:
+        {{- include "control-plane.labels" . | nindent 8 }}
+        app.kubernetes.io/component: operator
+    spec:
+      serviceAccountName: {{ include "control-plane.fullname" . }}-operator
+      containers:
+        - name: operator
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [bundle, exec, bin/operator]
+          env:
+            - { name: LOG_LEVEL,           value: "{{ .Values.operator.logLevel }}" }
+            - { name: CONTROL_NAMESPACE,   value: "{{ .Values.controlNamespace }}" }
+            - { name: PUBLIC_URL_BASE,     value: "{{ .Values.publicUrlBase }}" }
+            - { name: JWT_SOURCE_SECRET,   value: "{{ .Values.jwt.secretName }}" }
+            - { name: WORKSPACE_SHELL_IMAGE, value: "{{ .Values.workspace.shellImage }}" }
+          resources:
+            {{- toYaml .Values.operator.resources | nindent 12 }}
+{{- end }}

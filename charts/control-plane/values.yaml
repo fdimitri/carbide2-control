@@ -1,0 +1,76 @@
+# charts/control-plane — single cluster-wide install.
+#
+# Install:
+#   helm upgrade --install carbide-control charts/control-plane \
+#     -n carbide-system --create-namespace
+#
+# Required cluster-wide state (provisioned by carbide2-server's
+# scripts/dev-cluster.sh):
+#   - CNPG operator running
+#   - CNPG Cluster "carbide-pg" in namespace "carbide-system"
+#   - Traefik installed with IngressRoute CRDs
+#   - StorageClass "local-path"
+#   - Workspace CRD installed (kubectl apply -f deploy/crd-workspace.yaml)
+
+image:
+  repository: carbide2-control
+  tag: dev
+  pullPolicy: IfNotPresent
+
+# --- Rails (dashboard / API) ---
+rails:
+  enabled: true
+  replicas: 1
+  port: 3001
+  env: development
+  # Comma-separated host allowlist.
+  devHosts: "localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.svc.cluster.local,.cluster.local"
+  resources:
+    requests: { memory: "256Mi", cpu: "100m" }
+    limits:   { memory: "512Mi", cpu: "500m" }
+
+# --- Operator ---
+operator:
+  enabled: true
+  replicas: 1   # do not exceed 1 without leader election
+  logLevel: INFO
+  resources:
+    requests: { memory: "128Mi", cpu: "50m" }
+    limits:   { memory: "256Mi", cpu: "300m" }
+
+# --- Workspace defaults (the operator bakes these into Workspace CR spec
+# when it creates per-workspace resources) ---
+workspace:
+  image: carbide2
+  imageTag: dev
+  shellImage: carbide2-shell:dev
+  storageSize: 1Gi
+  storageClassName: local-path
+
+# --- Postgres (CNPG) used by BOTH the control plane and the workspaces ---
+postgres:
+  clusterName: carbide-pg
+  clusterNamespace: carbide-system
+  credentialsSecret: carbide-pg-app
+  controlDatabaseName: carbide_control
+
+# --- JWT shared with workspace pods ---
+jwt:
+  secretName: workspace-jwt
+  # If left blank the chart generates a random secret on first install
+  # (preserved across upgrades via lookup() in templates/jwt-secret.yaml).
+  secret: ""
+
+# --- Public ingress (dashboard) ---
+ingress:
+  enabled: true
+  host: ""        # path-only matching when blank
+  pathPrefix: "/dashboard"
+  publicPort: 8080
+  entryPoints: [web]
+
+# --- Where Workspace CRs live (operator watches this namespace) ---
+controlNamespace: carbide-system
+
+# --- Public URL base the dashboard redirects users to once a workspace is Ready ---
+publicUrlBase: "http://localhost:8080"

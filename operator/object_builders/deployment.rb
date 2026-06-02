@@ -1,0 +1,169 @@
+# operator/object_builders/deployment.rb
+#
+# The workspace pod itself: one container running foreman (rails + worker +
+# vite). Mirrors charts/workspace/templates/deployment.yaml in carbide2-server
+# closely — keep the two in sync, or eventually delete that chart entirely
+# once the operator is the only path to a workspace.
+#
+# When spec.git is set, an init container runs `git clone --depth 1` into the
+# files PVC before the main container starts. Idempotent: skips if the
+# target dir already has content (handles pod restarts after the initial
+# clone).
+
+module Operator
+  module ObjectBuilders
+    module Deployment
+      module_function
+
+      def build(ctx)
+        pg = ctx.postgres
+        cluster_namespace = pg[:clusterNamespace] || pg["clusterNamespace"] || "carbide-system"
+        cluster_name      = pg[:clusterName] || pg["clusterName"] || "carbide-pg"
+        creds_secret      = pg[:credentialsSecret] || pg["credentialsSecret"] || "carbide-pg-app"
+        path_prefix       = ctx.ingress[:pathPrefix] || ctx.ingress["pathPrefix"] || "/w/#{ctx.project_id}"
+        public_port       = (ctx.ingress[:publicPort] || ctx.ingress["publicPort"] || 8080).to_i
+
+        replicas = ctx.paused? ? 0 : 1
+
+        {
+          apiVersion: "apps/v1",
+          kind:       "Deployment",
+          metadata: {
+            name:            ctx.workspace_name,
+            namespace:       ctx.workspace_namespace,
+            labels:          ctx.common_labels,
+            ownerReferences: [ctx.owner_reference]
+          },
+          spec: {
+            replicas: replicas,
+            strategy: { type: "Recreate" },  # RWO PVC, single replica
+            selector: {
+              matchLabels: {
+                "app.kubernetes.io/instance" => ctx.workspace_name,
+                "app.kubernetes.io/name"     => "workspace"
+              }
+            },
+            template: {
+              metadata: { labels: ctx.common_labels },
+              spec: {
+                serviceAccountName: ctx.workspace_name,
+                initContainers:     init_containers(ctx),
+                containers: [
+                  {
+                    name:            "workspace",
+                    image:           ctx.image,
+                    imagePullPolicy: ctx.image_pull_policy,
+                    ports: [
+                      { name: "rails",  containerPort: 3000 },
+                      { name: "worker", containerPort: 8080 },
+                      { name: "vite",   containerPort: 5173 }
+                    ],
+                    env: env_vars(ctx, cluster_namespace, cluster_name, creds_secret, path_prefix, public_port),
+                    volumeMounts: [
+                      { name: "files", mountPath: "/srv/projects" }
+                    ],
+                    readinessProbe: {
+                      httpGet:             { path: "/up", port: "rails" },
+                      initialDelaySeconds: 20,
+                      periodSeconds:       5,
+                      failureThreshold:    12
+                    },
+                    livenessProbe: {
+                      httpGet:             { path: "/up", port: "rails" },
+                      initialDelaySeconds: 60,
+                      periodSeconds:       30
+                    },
+                    resources: {
+                      requests: { memory: "512Mi", cpu: "200m" },
+                      limits:   { memory: "1Gi",   cpu: "1" }
+                    }
+                  }
+                ],
+                volumes: [
+                  {
+                    name: "files",
+                    persistentVolumeClaim: { claimName: ctx.files_pvc_name }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      end
+
+      def init_containers(ctx)
+        containers = []
+        if (git = ctx.git)
+          url = git[:cloneUrl] || git["cloneUrl"]
+          ref = git[:ref]      || git["ref"] || "main"
+          if url && !url.empty?
+            target = "/srv/projects/#{ctx.project_id}"
+            containers << {
+              name:  "git-clone",
+              image: "alpine/git:latest",
+              command: ["/bin/sh", "-c"],
+              args: [
+                # Idempotent: skip if anything is already there.
+                "if [ -z \"$(ls -A #{target} 2>/dev/null)\" ]; then " \
+                  "mkdir -p #{target} && " \
+                  "git clone --depth 1 -b #{ref} #{url} #{target}; " \
+                "else echo '[git-clone] target non-empty, skipping'; fi"
+              ],
+              volumeMounts: [{ name: "files", mountPath: "/srv/projects" }]
+            }
+          end
+        end
+        containers
+      end
+
+      def env_vars(ctx, pg_ns, pg_cluster, pg_secret, path_prefix, public_port)
+        [
+          { name: "WORKSPACE_PROJECT_ID", value: ctx.project_id.to_s },
+          { name: "RAILS_ENV",           value: ENV.fetch("WORKSPACE_RAILS_ENV", "development") },
+          { name: "PORT",                value: "3000" },
+          { name: "WORKER_PORT",         value: "8080" },
+          { name: "VITE_PORT",           value: "5173" },
+          { name: "PROJECTS_ROOT",       value: "/srv/projects" },
+
+          # Postgres
+          { name: "POSTGRES_HOST",       value: "#{pg_cluster}-rw.#{pg_ns}.svc.cluster.local" },
+          { name: "POSTGRES_PORT",       value: "5432" },
+          { name: "POSTGRES_DB",         value: ctx.database_name },
+          {
+            name: "POSTGRES_USER",
+            valueFrom: { secretKeyRef: { name: pg_secret, key: "username" } }
+          },
+          {
+            name: "POSTGRES_PASSWORD",
+            valueFrom: { secretKeyRef: { name: pg_secret, key: "password" } }
+          },
+
+          # JWT — mirrored into this namespace by the operator
+          {
+            name: "WORKER_JWT_SECRET",
+            valueFrom: { secretKeyRef: { name: ctx.jwt_secret_name, key: "secret" } }
+          },
+
+          # Vite (served behind the ingress, not stripped)
+          { name: "VITE_BASE",            value: "#{path_prefix}/" },
+          { name: "VITE_HMR_CLIENT_PORT", value: public_port.to_s },
+          { name: "VITE_API_PROXY",       value: "http://127.0.0.1:3000" },
+
+          # Host allowlist — wide for dev, override per cluster as needed
+          { name: "RAILS_DEV_HOSTS", value: ENV.fetch("WORKSPACE_DEV_HOSTS",
+            "localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.svc.cluster.local,.cluster.local") },
+
+          # Worker shell backend
+          { name: "CARBIDE_BACKEND",            value: "kube" },
+          { name: "CARBIDE_SHELL_IMAGE",        value: ENV.fetch("WORKSPACE_SHELL_IMAGE", "carbide2-shell:dev") },
+          { name: "CARBIDE_SHELL_PULL_POLICY",  value: "IfNotPresent" },
+          {
+            name: "CARBIDE_NAMESPACE",
+            valueFrom: { fieldRef: { fieldPath: "metadata.namespace" } }
+          },
+          { name: "CARBIDE_PROJECTS_PVC", value: ctx.files_pvc_name }
+        ]
+      end
+    end
+  end
+end
