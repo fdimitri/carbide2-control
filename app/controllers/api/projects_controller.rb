@@ -53,7 +53,12 @@ class Api::ProjectsController < ApplicationController
   def ws_token
     project = find_project
     token = CarbideControl::JwtIssuer.issue!(user: current_user, project: project)
-    render json: { token: token, project_id: project.id, url: workspace_url(project) }
+    render json: {
+      token: token,
+      project_id: project.id,
+      url: workspace_url(project),
+      user: { id: current_user.id, email: current_user.email }
+    }
   end
 
   private
