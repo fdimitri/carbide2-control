@@ -14,3 +14,7 @@
 /coverage/
 /node_modules
 .DS_Store
+
+# carbide2-client tree is provided by the meta-repo or a symlink, never tracked here
+clients/
+

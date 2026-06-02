@@ -14,4 +14,13 @@ Rails.application.routes.draw do
   end
 
   get 'up' => 'rails/health#show', as: :rails_health_check
+
+  # SPA fallback — must be LAST. Catches any other GET that wasn't matched
+  # above (e.g. /login, /preferences) and returns public/index.html so
+  # Vue Router's history mode can handle the route client-side. Asset URLs
+  # under /assets/* are served by public_file_server before reaching here.
+  get '*path', to: 'spa#show', constraints: ->(req) {
+    !req.path.start_with?('/api', '/users', '/rails', '/assets', '/up')
+  }
+  root to: 'spa#show'
 end
