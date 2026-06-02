@@ -1,0 +1,202 @@
+# carbide2-control / Workspace CRD
+#
+# This is the contract between the control plane (Rails) and the operator.
+# Rails creates Workspace resources; the operator reconciles them into the
+# matching K8s objects (Namespace, Deployment, Service, PVC, IngressRoute,
+# Secrets, ServiceAccount, RoleBinding).
+#
+# Rails NEVER writes any K8s object other than Workspace. The operator NEVER
+# reads control-plane DB tables. The CR is the only data flowing between them.
+
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: workspaces.carbide.dev
+spec:
+  group: carbide.dev
+  scope: Namespaced  # CRs live in the carbide-system namespace; the workspaces
+                     # they spawn each get their OWN namespace (ws-N).
+  names:
+    kind: Workspace
+    listKind: WorkspaceList
+    plural: workspaces
+    singular: workspace
+    shortNames: [ws]
+    categories: [carbide]
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [projectId, ownerEmail, workspaceImage]
+              properties:
+                # ---- identity ----
+                projectId:
+                  type: integer
+                  minimum: 1
+                  description: |
+                    Numeric project id, mirrors the control-plane DB primary key.
+                    Used to derive default namespace name (ws-<id>),
+                    PVC name, ingress path, and JWT audience.
+                ownerEmail:
+                  type: string
+                  format: email
+                  description: For display in the operator log + audit trail.
+
+                # ---- image / runtime ----
+                workspaceImage:
+                  type: string
+                  description: |
+                    Container image for the workspace pod. Almost always
+                    "carbide2:<tag>" pointing at carbide2-server.
+                workspaceImageTag:
+                  type: string
+                  default: dev
+                workspaceImagePullPolicy:
+                  type: string
+                  enum: [Always, IfNotPresent, Never]
+                  default: IfNotPresent
+
+                # ---- storage ----
+                storageSize:
+                  type: string
+                  pattern: '^[0-9]+(Mi|Gi|Ti)$'
+                  default: 1Gi
+                storageClassName:
+                  type: string
+                  default: local-path
+
+                # ---- postgres ----
+                # The workspace pod connects to a shared CNPG cluster. The
+                # operator creates a per-workspace Database CR against that
+                # cluster (separate logical DB per workspace).
+                postgres:
+                  type: object
+                  required: [clusterName, clusterNamespace]
+                  properties:
+                    clusterName:
+                      type: string
+                      default: carbide-pg
+                    clusterNamespace:
+                      type: string
+                      default: carbide-system
+                    credentialsSecret:
+                      type: string
+                      default: carbide-pg-app
+
+                # ---- optional initial git clone ----
+                # When set, the operator adds an initContainer that runs
+                # `git clone --depth 1 -b <ref> <cloneUrl> /srv/projects/<id>`
+                # before the workspace container starts. No-op if the target
+                # dir is non-empty (idempotent across pod restarts).
+                git:
+                  type: object
+                  properties:
+                    cloneUrl:
+                      type: string
+                      pattern: '^(https?://|git@)'
+                    ref:
+                      type: string
+                      default: main
+                    # Optional reference to a Secret with .data.token for
+                    # private repos. Token is injected as an HTTPS basic-auth
+                    # header in the init container.
+                    credentialsSecretName:
+                      type: string
+
+                # ---- ingress ----
+                ingress:
+                  type: object
+                  required: [pathPrefix]
+                  properties:
+                    pathPrefix:
+                      type: string
+                      pattern: '^/[a-z0-9/_-]+$'
+                      description: e.g. "/w/42" — Traefik strips this before forwarding to the pod.
+                    host:
+                      type: string
+                      description: Optional; empty = path-only matching.
+                    publicPort:
+                      type: integer
+                      default: 8080
+                      description: External port the browser uses (for Vite HMR client config).
+                    entryPoints:
+                      type: array
+                      items: { type: string }
+                      default: [web]
+
+                # ---- resources ----
+                resources:
+                  type: object
+                  properties:
+                    requests:
+                      type: object
+                      properties:
+                        cpu: { type: string }
+                        memory: { type: string }
+                    limits:
+                      type: object
+                      properties:
+                        cpu: { type: string }
+                        memory: { type: string }
+
+                # ---- lifecycle ----
+                # Future: paused: true tears down the Deployment but keeps the
+                # PVC + Namespace + DB; flipping back creates the Deployment again.
+                paused:
+                  type: boolean
+                  default: false
+
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                  enum: [Pending, Provisioning, Ready, Failed, Paused, Terminating]
+                message:
+                  type: string
+                  description: Human-readable detail for the current phase.
+                namespace:
+                  type: string
+                  description: The actual namespace created (usually ws-<projectId>).
+                url:
+                  type: string
+                  description: Browser-reachable URL once Ready.
+                observedGeneration:
+                  type: integer
+                  description: Last spec generation the reconciler has acted on.
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required: [type, status, lastTransitionTime]
+                    properties:
+                      type:    { type: string }
+                      status:  { type: string, enum: ["True", "False", "Unknown"] }
+                      reason:  { type: string }
+                      message: { type: string }
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Project
+          type: integer
+          jsonPath: .spec.projectId
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: URL
+          type: string
+          jsonPath: .status.url
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
