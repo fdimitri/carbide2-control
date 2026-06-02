@@ -14,6 +14,9 @@ ENV["BUNDLE_GEMFILE"] ||= File.expand_path("../Gemfile", __dir__)
 require "bundler/setup"
 Bundler.require(:default)
 
+$stdout.sync = true
+$stderr.sync = true
+
 # Add lib/ and operator/ to the load path so requires Just Work.
 ROOT = File.expand_path("..", __dir__)
 $LOAD_PATH.unshift(File.join(ROOT, "lib"))
@@ -32,7 +35,8 @@ reconciler = Operator::WorkspaceReconciler.new(logger: logger, namespace: namesp
 
 %w[INT TERM].each do |sig|
   Signal.trap(sig) do
-    logger.info "[operator] caught SIG#{sig}, shutting down"
+    # Logger.write isn't trap-safe. Just flip the flag; the run! loop
+    # will print + exit cleanly.
     reconciler.stop!
   end
 end

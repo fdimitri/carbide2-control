@@ -34,7 +34,13 @@ rules:
   # Per-workspace core objects (created inside ws-* namespaces)
   - apiGroups: [""]
     resources: [services, persistentvolumeclaims, serviceaccounts, secrets, configmaps, pods]
-    verbs: [get, list, watch, create, delete, patch, update]
+    verbs: [get, list, watch, create, delete, deletecollection, patch, update]
+
+  # Pod subresources — the operator must hold these in order to grant them
+  # to the per-workspace Role (Kubernetes privilege-escalation prevention).
+  - apiGroups: [""]
+    resources: [pods/exec, pods/log, pods/portforward, pods/attach]
+    verbs: [get, list, watch, create, delete, deletecollection, patch, update]
 
   # Apps
   - apiGroups: ["apps"]

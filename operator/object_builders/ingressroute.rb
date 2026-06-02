@@ -27,7 +27,6 @@ module Operator
             name:            ctx.ingress_route_name,
             namespace:       ctx.workspace_namespace,
             labels:          ctx.common_labels,
-            ownerReferences: [ctx.owner_reference]
           },
           spec: {
             entryPoints: entry_points,
@@ -70,7 +69,6 @@ module Operator
             name:            "#{ctx.workspace_name}-stripprefix",
             namespace:       ctx.workspace_namespace,
             labels:          ctx.common_labels,
-            ownerReferences: [ctx.owner_reference]
           },
           spec: {
             stripPrefix: { prefixes: [path_prefix] }

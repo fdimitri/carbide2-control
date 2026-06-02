@@ -22,7 +22,6 @@ module Operator
             name:            ctx.jwt_secret_name,
             namespace:       ctx.workspace_namespace,
             labels:          ctx.common_labels,
-            ownerReferences: [ctx.owner_reference]
           },
           data: data
         }

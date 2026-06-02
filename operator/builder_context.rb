@@ -96,20 +96,14 @@ module Operator
       }
     end
 
-    # ownerReference back to the Workspace CR. Lets `kubectl delete workspace
-    # ws-N` cascade-delete every Namespaced resource we created in the SAME
-    # namespace as the CR. The Namespace itself can't have an ownerRef back
-    # to the CR (cluster-scoped vs namespaced), so the reconciler deletes it
-    # explicitly via the finalizer.
+    # Cross-namespace ownerReferences are NOT supported by Kubernetes garbage
+    # collection — the Workspace CR lives in carbide-system while the resources
+    # we create live in ws-N, so any ownerRef pointing at the CR triggers
+    # OwnerRefInvalidNamespace and the GC deletes our resources immediately.
+    # We rely on Namespace deletion (cascading) at teardown instead. This
+    # accessor returns nil; builders skip the field when nil.
     def owner_reference
-      {
-        apiVersion:         "carbide.dev/v1",
-        kind:               "Workspace",
-        name:               metadata[:name] || metadata["name"],
-        uid:                metadata[:uid] || metadata["uid"],
-        controller:         true,
-        blockOwnerDeletion: true
-      }
+      nil
     end
   end
 end

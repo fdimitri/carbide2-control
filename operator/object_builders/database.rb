@@ -28,7 +28,7 @@ module Operator
           },
           spec: {
             name:    ctx.database_name,
-            owner:   "app",                          # CNPG default app user
+            owner:   pg[:owner] || pg["owner"] || "carbide", # cluster's app role
             cluster: { name: pg[:clusterName] || pg["clusterName"] || "carbide-pg" }
           }
         }

@@ -53,6 +53,9 @@ postgres:
   clusterNamespace: carbide-system
   credentialsSecret: carbide-pg-app
   controlDatabaseName: carbide_control
+  # DB role that owns the control DB. Must already exist in the cluster
+  # (carbide2-server's CNPG bootstrap creates 'carbide' with CREATEDB+SUPERUSER).
+  owner: carbide
 
 # --- JWT shared with workspace pods ---
 jwt:

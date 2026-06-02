@@ -28,6 +28,7 @@ module Operator
   class WorkspaceReconciler
     FINALIZER = "carbide.dev/workspace-cleanup".freeze
     JWT_SOURCE_SECRET = ENV.fetch("JWT_SOURCE_SECRET", "workspace-jwt").freeze
+    IMMUTABLE_SPEC_KINDS = %i[persistent_volume_claim].freeze
 
     def initialize(logger:, namespace:)
       @logger    = logger
@@ -91,7 +92,7 @@ module Operator
       finalizers << FINALIZER
       patch = { metadata: { finalizers: finalizers } }
       name  = cr.dig(:metadata, :name) || cr.dig("metadata", "name")
-      KubeClient.carbide.patch_workspace(name, patch, @namespace)
+      KubeClient.carbide.merge_patch_workspace(name, patch, @namespace)
     end
 
     def remove_finalizer!(cr)
@@ -99,7 +100,7 @@ module Operator
       finalizers.delete(FINALIZER)
       patch = { metadata: { finalizers: finalizers } }
       name  = cr.dig(:metadata, :name) || cr.dig("metadata", "name")
-      KubeClient.carbide.patch_workspace(name, patch, @namespace)
+      KubeClient.carbide.merge_patch_workspace(name, patch, @namespace)
     end
 
     def reconcile!(ctx, cr)
@@ -169,6 +170,32 @@ module Operator
       apply!(KubeClient.traefik, :middleware,             mw)
       apply!(KubeClient.traefik, :ingress_route,          ir)
       apply!(KubeClient.apps,    :deployment,             dep)
+      replicate_pg_credentials(ctx)
+    end
+
+    # The workspace Deployment mounts `postgres.credentialsSecret` as env. The
+    # source secret lives next to the CNPG Cluster (carbide-system); copy it
+    # into the workspace namespace under the same name. Long-term, each
+    # workspace gets its own DB role + per-workspace secret.
+    def replicate_pg_credentials(ctx)
+      pg            = ctx.postgres
+      src_namespace = pg[:clusterNamespace] || pg["clusterNamespace"] || "carbide-system"
+      secret_name   = pg[:credentialsSecret] || pg["credentialsSecret"]
+      return unless secret_name
+
+      src = KubeClient.core.get_secret(secret_name, src_namespace)
+      copy = {
+        apiVersion: "v1",
+        kind:       "Secret",
+        metadata: {
+          name:      secret_name,
+          namespace: ctx.workspace_namespace,
+          labels:    ctx.common_labels
+        },
+        type: src.type,
+        data: src.data.to_h
+      }
+      apply!(KubeClient.core, :secret, copy)
     end
 
     def apply_database(ctx)
@@ -192,14 +219,27 @@ module Operator
         # We don't blindly replace because K8s adds server-side fields
         # (resourceVersion, uid, etc.) we mustn't clobber.
         existing.metadata.labels = obj[:metadata][:labels] if obj[:metadata][:labels]
-        existing.spec            = obj[:spec]              if obj[:spec]
+        # PVC spec (and certain other resources) is immutable once bound — only
+        # propagate labels for those, never replace the spec.
+        unless IMMUTABLE_SPEC_KINDS.include?(kind)
+          existing.spec          = obj[:spec]              if obj[:spec]
+        end
         existing.data            = obj[:data]              if obj[:data]
         existing.rules           = obj[:rules]             if obj[:rules]
         existing.subjects        = obj[:subjects]          if obj[:subjects]
         existing.roleRef         = obj[:roleRef]           if obj[:roleRef]
         client.public_send(updater, existing)
       rescue Kubeclient::ResourceNotFoundError
+        @logger.info "[apply] creating #{kind} #{namespace}/#{name}"
         client.public_send(creator, Kubeclient::Resource.new(obj))
+      rescue Kubeclient::HttpError => e
+        if e.error_code == 404
+          @logger.info "[apply] (HttpError 404) creating #{kind} #{namespace}/#{name}"
+          client.public_send(creator, Kubeclient::Resource.new(obj))
+        else
+          @logger.error "[apply] #{kind} #{namespace}/#{name} failed code=#{e.error_code.inspect}: #{e.message}"
+          raise
+        end
       end
     end
 
@@ -218,10 +258,10 @@ module Operator
       status[:namespace] = "ws-#{cr.dig(:spec, :projectId) || cr.dig("spec", "projectId")}"
 
       begin
-        KubeClient.carbide.patch_workspace_status(name, { status: status }, @namespace)
+        KubeClient.carbide.merge_patch_workspace_status(name, { status: status }, @namespace)
       rescue NoMethodError
         # Older kubeclient — fall back to non-subresource patch.
-        KubeClient.carbide.patch_workspace(name, { status: status }, @namespace)
+        KubeClient.carbide.merge_patch_workspace(name, { status: status }, @namespace)
       end
     rescue StandardError => e
       @logger.warn "[reconciler] status update failed: #{e.message}"

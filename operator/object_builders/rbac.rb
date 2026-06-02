@@ -17,7 +17,6 @@ module Operator
             name:            ctx.workspace_name,
             namespace:       ctx.workspace_namespace,
             labels:          ctx.common_labels,
-            ownerReferences: [ctx.owner_reference]
           },
           rules: [
             {
@@ -47,7 +46,6 @@ module Operator
             name:            ctx.workspace_name,
             namespace:       ctx.workspace_namespace,
             labels:          ctx.common_labels,
-            ownerReferences: [ctx.owner_reference]
           },
           subjects: [{
             kind:      "ServiceAccount",
