@@ -68,7 +68,7 @@ jwt:
 ingress:
   enabled: true
   host: ""        # path-only matching when blank
-  pathPrefix: "/dashboard"
+  pathPrefix: "/"
   publicPort: 8080
   entryPoints: [web]
 

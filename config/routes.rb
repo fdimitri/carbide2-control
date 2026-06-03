@@ -9,6 +9,7 @@ Rails.application.routes.draw do
     resources :workspaces, only: [:index, :show, :create, :destroy] do
       member do
         post :token   # mint per-workspace JWT for workspace pod bootstrap
+        get  :health  # active reachability probe (rails + worker WS)
       end
     end
   end

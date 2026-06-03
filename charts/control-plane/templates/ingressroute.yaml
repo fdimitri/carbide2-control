@@ -1,4 +1,5 @@
 {{- if .Values.ingress.enabled }}
+{{- if ne .Values.ingress.pathPrefix "/" }}
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
@@ -9,6 +10,7 @@ spec:
     prefixes:
       - {{ .Values.ingress.pathPrefix | quote }}
 ---
+{{- end }}
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -22,9 +24,12 @@ spec:
   routes:
     - match: {{ if .Values.ingress.host }}Host(`{{ .Values.ingress.host }}`) && {{ end }}PathPrefix(`{{ .Values.ingress.pathPrefix }}`)
       kind: Rule
+      priority: 1
       services:
         - name: {{ include "control-plane.fullname" . }}
           port: {{ .Values.rails.port }}
+{{- if ne .Values.ingress.pathPrefix "/" }}
       middlewares:
         - name: {{ include "control-plane.fullname" . }}-stripprefix
+{{- end }}
 {{- end }}

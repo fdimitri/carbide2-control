@@ -43,6 +43,11 @@ class Api::WorkspacesController < ApplicationController
     rescue Kubeclient::HttpError => e
       Rails.logger.error("[workspaces#destroy] workspace CR delete failed: #{e.message}")
     end
+    # The operator owns async teardown of the pod/namespace/PVC via the CR's
+    # ownerReferences once the CR is gone. The control-plane row itself has no
+    # reason to linger — delete it so the dashboard doesn't show ghost
+    # "terminating" entries forever. Memberships cascade via dependent: :destroy.
+    workspace.destroy
     head :no_content
   end
 
@@ -57,6 +62,24 @@ class Api::WorkspacesController < ApplicationController
       workspace_id: workspace.id,
       url: workspace_url(workspace),
       user: { id: current_user.id, email: current_user.email }
+    }
+  end
+
+  # GET /api/workspaces/:id/health
+  # Active reachability probe for the workspace pod: is the container up (CR
+  # phase), does Rails answer, and does the worker WebSocket upgrade. Kept
+  # separate from #index so the list stays fast; the dashboard polls this
+  # per-card.
+  def health
+    workspace = find_workspace
+    cr    = CarbideControl::WorkspaceApi.get(workspace) rescue nil
+    phase = cr&.dig(:status, :phase)&.downcase || workspace.status
+    probe = WorkspaceHealthProbe.new(workspace).call
+    render json: {
+      id:        workspace.id,
+      phase:     phase,
+      reachable: { rails: probe[:rails], ws: probe[:ws] },
+      ok:        probe[:ok]
     }
   end
 
