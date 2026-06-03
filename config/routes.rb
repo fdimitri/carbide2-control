@@ -6,9 +6,9 @@ Rails.application.routes.draw do
     post '/signup', to: 'sessions#signup'
     delete '/logout', to: 'sessions#destroy'
 
-    resources :projects, only: [:index, :show, :create, :destroy] do
+    resources :workspaces, only: [:index, :show, :create, :destroy] do
       member do
-        post :ws_token   # mint per-project JWT for workspace WS connect
+        post :token   # mint per-workspace JWT for workspace pod bootstrap
       end
     end
   end
