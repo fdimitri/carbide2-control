@@ -10,6 +10,8 @@
 # target dir already has content (handles pod restarts after the initial
 # clone).
 
+require "uri"
+
 module Operator
   module ObjectBuilders
     module Deployment
@@ -148,9 +150,11 @@ module Operator
           { name: "VITE_HMR_CLIENT_PORT", value: public_port.to_s },
           { name: "VITE_API_PROXY",       value: "http://127.0.0.1:3000" },
 
-          # Host allowlist — wide for dev, override per cluster as needed
-          { name: "RAILS_DEV_HOSTS", value: ENV.fetch("WORKSPACE_DEV_HOSTS",
-            "localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.svc.cluster.local,.cluster.local") },
+          # Host allowlist — wide for dev, override per cluster as needed.
+          # The public ingress host (from PUBLIC_URL_BASE, e.g.
+          # dev1.frankd.local) is appended automatically so the browser-facing
+          # hostname is always accepted by Rails 8 host authorization.
+          { name: "RAILS_DEV_HOSTS", value: workspace_dev_hosts },
 
           # Worker shell backend
           { name: "CARBIDE_BACKEND",            value: "kube" },
@@ -162,6 +166,29 @@ module Operator
           },
           { name: "CARBIDE_PROJECTS_PVC", value: ctx.files_pvc_name }
         ]
+      end
+
+      # Comma-separated Rails host allowlist for the workspace pod. Starts from
+      # WORKSPACE_DEV_HOSTS (or a wide RFC-1918 default) and appends the public
+      # ingress host parsed from PUBLIC_URL_BASE (e.g. dev1.frankd.local), so
+      # the browser-facing hostname passes Rails 8 host authorization without
+      # per-cluster env tweaks.
+      def workspace_dev_hosts
+        hosts = ENV.fetch("WORKSPACE_DEV_HOSTS",
+          "localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16," \
+          ".svc.cluster.local,.cluster.local").split(",").map(&:strip).reject(&:empty?)
+
+        base = ENV.fetch("PUBLIC_URL_BASE", "")
+        unless base.empty?
+          host = begin
+            URI.parse(base).host
+          rescue URI::InvalidURIError
+            nil
+          end
+          hosts << host if host && !host.empty? && !hosts.include?(host)
+        end
+
+        hosts.join(",")
       end
     end
   end
