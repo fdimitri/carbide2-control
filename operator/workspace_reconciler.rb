@@ -158,6 +158,8 @@ module Operator
       svc    = ObjectBuilders::Service.build(ctx)
       ir     = ObjectBuilders::IngressRoute.build(ctx)
       mw     = ObjectBuilders::IngressRoute.middleware(ctx)
+      redir_mw = ObjectBuilders::IngressRoute.redirect_middleware(ctx)
+      redir_ir = ObjectBuilders::IngressRoute.redirect_route(ctx)
       dep    = ObjectBuilders::Deployment.build(ctx)
       secret = ObjectBuilders::JwtSecret.build(ctx, data: fetch_jwt_secret_data)
 
@@ -169,6 +171,10 @@ module Operator
       apply!(KubeClient.core,    :service,                svc)
       apply!(KubeClient.traefik, :middleware,             mw)
       apply!(KubeClient.traefik, :ingress_route,          ir)
+      # When HTTPS is forced these are present: a redirect middleware plus a
+      # web-entrypoint IngressRoute that 301s plain HTTP up to HTTPS.
+      apply!(KubeClient.traefik, :middleware,    redir_mw) if redir_mw
+      apply!(KubeClient.traefik, :ingress_route, redir_ir) if redir_ir
       apply!(KubeClient.apps,    :deployment,             dep)
       replicate_pg_credentials(ctx)
     end

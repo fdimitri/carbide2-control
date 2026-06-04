@@ -126,10 +126,21 @@ spec:
                       type: integer
                       default: 8080
                       description: External port the browser uses (for Vite HMR client config).
+                    publicHttpsPort:
+                      type: integer
+                      default: 8443
+                      description: External HTTPS port the browser uses; the HTTP→HTTPS redirect targets it explicitly.
                     entryPoints:
                       type: array
                       items: { type: string }
                       default: [web]
+                    tls:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                      description: >-
+                        Traefik IngressRoute TLS block for the websecure
+                        entrypoint. Empty ({}) uses Traefik's default cert.
+                        May carry secretName/options/domains for a real cert.
 
                 # ---- resources ----
                 resources:

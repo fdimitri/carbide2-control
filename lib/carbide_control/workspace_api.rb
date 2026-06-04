@@ -64,7 +64,17 @@ module CarbideControl
           ingress: {
             pathPrefix: project.ingress_path_prefix,
             publicPort: ENV.fetch('INGRESS_PUBLIC_PORT', '8080').to_i,
-            entryPoints: ['web']
+            # Public HTTPS port the browser uses; the HTTP→HTTPS redirect
+            # targets this explicitly because it may differ from Traefik's
+            # internal exposedPort (e.g. 8443 in the k3d dev cluster).
+            publicHttpsPort: ENV.fetch('INGRESS_PUBLIC_HTTPS_PORT', '8443').to_i,
+            # Serve on both the plaintext (web) and TLS (websecure) entrypoints
+            # so the workspace is reachable over HTTPS. Override with
+            # INGRESS_ENTRYPOINTS (comma-separated) if a deployment only wants
+            # one. tls: {} terminates TLS on websecure with Traefik's default
+            # cert (self-signed until a real cert is configured).
+            entryPoints: ENV.fetch('INGRESS_ENTRYPOINTS', 'web,websecure').split(',').map(&:strip).reject(&:empty?),
+            tls: {}
           }
         }
       }

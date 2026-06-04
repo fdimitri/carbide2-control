@@ -70,7 +70,14 @@ ingress:
   host: ""        # path-only matching when blank
   pathPrefix: "/"
   publicPort: 8080
-  entryPoints: [web]
+  # External HTTPS port the browser reaches Traefik on. The HTTP→HTTPS redirect
+  # targets this explicitly because it can differ from Traefik's internal
+  # exposedPort (the dev k3d cluster maps host :8443 -> Traefik :443).
+  publicHttpsPort: 8443
+  entryPoints: [web, websecure]
+  # TLS config for the websecure entrypoint. Empty dict ({}) uses Traefik's
+  # default cert (self-signed until a real cert/secretName is supplied here).
+  tls: {}
 
 # --- Where Workspace CRs live (operator watches this namespace) ---
 controlNamespace: carbide-system
