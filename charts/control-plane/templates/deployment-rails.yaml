@@ -52,7 +52,11 @@ spec:
             - { name: WORKSPACE_STORAGE_CLASS, value: "{{ .Values.workspace.storageClassName }}" }
             - { name: WORKSPACE_SHELL_IMAGE, value: "{{ .Values.workspace.shellImage }}" }
             - { name: INGRESS_PUBLIC_PORT, value: "{{ .Values.ingress.publicPort }}" }
-            - { name: RAILS_DEV_HOSTS,   value: "{{ .Values.rails.devHosts }}" }
+            {{- /* Derive the public hostname from publicUrlBase (strip scheme + port)
+                   and append it to the dev host allowlist so the ingress FQDN
+                   (e.g. dev1.frankd.local) passes Rails 8 host authorization. */}}
+            {{- $pubHost := regexReplaceAll ":[0-9]+$" (regexReplaceAll "^[a-zA-Z]+://" .Values.publicUrlBase "") "" }}
+            - { name: RAILS_DEV_HOSTS,   value: "{{ .Values.rails.devHosts }}{{ if $pubHost }},{{ $pubHost }}{{ end }}" }
             - { name: PG_CLUSTER_NAME,        value: "{{ .Values.postgres.clusterName }}" }
             - { name: PG_CLUSTER_NAMESPACE,   value: "{{ .Values.postgres.clusterNamespace }}" }
             - { name: PG_CREDENTIALS_SECRET,  value: "{{ .Values.postgres.credentialsSecret }}" }
