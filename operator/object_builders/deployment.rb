@@ -126,6 +126,11 @@ module Operator
           { name: "VITE_PORT",           value: "5173" },
           { name: "PROJECTS_ROOT",       value: "/srv/projects" },
 
+          # Persistent worker log on the files PVC: survives pod reaping/rollout
+          # so an overnight death stays debuggable (kubectl logs vanishes once
+          # the pod is gone). Timestamped + heartbeat; see worker/worker.rb.
+          { name: "CARBIDE_WORKER_LOG",  value: "/srv/projects/.carbide/worker.log" },
+
           # Postgres
           { name: "POSTGRES_HOST",       value: "#{pg_cluster}-rw.#{pg_ns}.svc.cluster.local" },
           { name: "POSTGRES_PORT",       value: "5432" },
