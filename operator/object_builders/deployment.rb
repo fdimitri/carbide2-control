@@ -150,10 +150,9 @@ module Operator
           { name: "VITE_HMR_CLIENT_PORT", value: public_port.to_s },
           { name: "VITE_API_PROXY",       value: "http://127.0.0.1:3000" },
 
-          # Host allowlist — wide for dev, override per cluster as needed.
-          # The public ingress host (from PUBLIC_URL_BASE, e.g.
-          # dev1.frankd.local) is appended automatically so the browser-facing
-          # hostname is always accepted by Rails 8 host authorization.
+          # Host allowlist. Defaults to "*" (accept any Host:) for dev — see
+          # workspace_dev_hosts. Set WORKSPACE_DEV_HOSTS to a comma-separated
+          # list to tighten per cluster.
           { name: "RAILS_DEV_HOSTS", value: workspace_dev_hosts },
 
           # Worker shell backend
@@ -168,17 +167,20 @@ module Operator
         ]
       end
 
-      # Comma-separated Rails host allowlist for the workspace pod. Starts from
-      # WORKSPACE_DEV_HOSTS (or a wide RFC-1918 default) and appends the public
-      # ingress host parsed from PUBLIC_URL_BASE (e.g. dev1.frankd.local), so
-      # the browser-facing hostname passes Rails 8 host authorization without
-      # per-cluster env tweaks.
+      # Comma-separated Rails host allowlist for the workspace pod. Defaults to
+      # "*" (accept any Host:) because the previous dev default was a set of
+      # RFC-1918 CIDRs, and a hostname Host: header (e.g. dev1.frankd.local) can
+      # never match an IP CIDR — so reaching a pod by name produced a 403
+      # "Blocked hosts" even though the LAN IP was allowlisted. Set
+      # WORKSPACE_DEV_HOSTS to a comma-separated list to tighten; when an
+      # explicit list is given the public ingress host parsed from
+      # PUBLIC_URL_BASE is appended for convenience.
       def workspace_dev_hosts
-        hosts = ENV.fetch("WORKSPACE_DEV_HOSTS",
-          "localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16," \
-          ".svc.cluster.local,.cluster.local").split(",").map(&:strip).reject(&:empty?)
+        configured = ENV.fetch("WORKSPACE_DEV_HOSTS", "*").strip
+        return "*" if configured.empty? || configured == "*"
 
-        base = ENV.fetch("PUBLIC_URL_BASE", "")
+        hosts = configured.split(",").map(&:strip).reject(&:empty?)
+        base  = ENV.fetch("PUBLIC_URL_BASE", "")
         unless base.empty?
           host = begin
             URI.parse(base).host
