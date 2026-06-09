@@ -20,6 +20,10 @@
 #
 # Requires BuildKit (`docker buildx` or DOCKER_BUILDKIT=1).
 FROM node:22-alpine AS dashboard-build
+ARG META_SHA=unknown
+ARG CLIENT_SHA=unknown
+ARG CONTROL_SHA=unknown
+ARG BUILD_TIME=unknown
 
 WORKDIR /client
 COPY --from=client package.json package-lock.json* ./
@@ -29,6 +33,10 @@ COPY --from=client . ./
 # VITE_CARBIDE_MODE=control bakes the mode into the bundle so getApiUrl()
 # uses /api and DashboardPage routes "open project" to /w/<id>/.
 ENV VITE_CARBIDE_MODE=control
+ENV VITE_APP_META_SHA=$META_SHA
+ENV VITE_APP_CLIENT_SHA=$CLIENT_SHA
+ENV VITE_APP_CONTROL_SHA=$CONTROL_SHA
+ENV VITE_APP_BUILD_TIME=$BUILD_TIME
 RUN npm run build
 
 # --- Stage 2: Rails + operator runtime
