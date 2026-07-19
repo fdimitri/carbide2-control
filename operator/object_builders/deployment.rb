@@ -1,7 +1,7 @@
 # operator/object_builders/deployment.rb
 #
-# The workspace pod itself: one container running foreman (rails + worker +
-# vite). Mirrors charts/workspace/templates/deployment.yaml in carbide2-server
+# The workspace pod itself: one container running foreman (rails + worker).
+# Mirrors charts/workspace/templates/deployment.yaml in carbide2-server
 # closely — keep the two in sync, or eventually delete that chart entirely
 # once the operator is the only path to a workspace.
 #
@@ -22,8 +22,6 @@ module Operator
         cluster_namespace = pg[:clusterNamespace] || pg["clusterNamespace"] || "carbide-system"
         cluster_name      = pg[:clusterName] || pg["clusterName"] || "carbide-pg"
         creds_secret      = pg[:credentialsSecret] || pg["credentialsSecret"] || "carbide-pg-app"
-        path_prefix       = ctx.ingress[:pathPrefix] || ctx.ingress["pathPrefix"] || "/w/#{ctx.project_id}"
-        public_port       = (ctx.ingress[:publicPort] || ctx.ingress["publicPort"] || 8080).to_i
 
         replicas = ctx.paused? ? 0 : 1
 
@@ -56,10 +54,9 @@ module Operator
                     imagePullPolicy: ctx.image_pull_policy,
                     ports: [
                       { name: "rails",  containerPort: 3000 },
-                      { name: "worker", containerPort: 8080 },
-                      { name: "vite",   containerPort: 5173 }
+                      { name: "worker", containerPort: 8080 }
                     ],
-                    env: env_vars(ctx, cluster_namespace, cluster_name, creds_secret, path_prefix, public_port),
+                    env: env_vars(ctx, cluster_namespace, cluster_name, creds_secret),
                     volumeMounts: [
                       { name: "files", mountPath: "/srv/projects" }
                     ],
@@ -117,14 +114,23 @@ module Operator
         containers
       end
 
-      def env_vars(ctx, pg_ns, pg_cluster, pg_secret, path_prefix, public_port)
+      def env_vars(ctx, pg_ns, pg_cluster, pg_secret)
         [
           { name: "WORKSPACE_PROJECT_ID", value: ctx.project_id.to_s },
           { name: "RAILS_ENV",           value: ENV.fetch("WORKSPACE_RAILS_ENV", "development") },
           { name: "PORT",                value: "3000" },
           { name: "WORKER_PORT",         value: "8080" },
-          { name: "VITE_PORT",           value: "5173" },
           { name: "PROJECTS_ROOT",       value: "/srv/projects" },
+
+          # The Decider: the workspace SPA is NOT baked into the image. The
+          # loader (SpaController / ClientRegistry) fetches the pinned build's
+          # index.html from the MinIO static tier over in-cluster HTTP; the
+          # browser loads the assets via Traefik at /clients/<family>/<sha>/.
+          {
+            name:  "CARBIDE_CLIENT_TIER_URL",
+            value: ENV.fetch("WORKSPACE_CLIENT_TIER_URL",
+                             "http://minio.carbide-system.svc.cluster.local:9000/clients")
+          },
 
           # Persistent worker log on the files PVC: survives pod reaping/rollout
           # so an overnight death stays debuggable (kubectl logs vanishes once
@@ -149,11 +155,6 @@ module Operator
             name: "WORKER_JWT_SECRET",
             valueFrom: { secretKeyRef: { name: ctx.jwt_secret_name, key: "secret" } }
           },
-
-          # Vite (served behind the ingress, not stripped)
-          { name: "VITE_BASE",            value: "#{path_prefix}/" },
-          { name: "VITE_HMR_CLIENT_PORT", value: public_port.to_s },
-          { name: "VITE_API_PROXY",       value: "http://127.0.0.1:3000" },
 
           # Host allowlist. Defaults to "*" (accept any Host:) for dev — see
           # workspace_dev_hosts. Set WORKSPACE_DEV_HOSTS to a comma-separated

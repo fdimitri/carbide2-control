@@ -20,8 +20,7 @@ module Operator
             },
             ports: [
               { name: "rails",  port: 3000, targetPort: "rails" },
-              { name: "worker", port: 8080, targetPort: "worker" },
-              { name: "vite",   port: 5173, targetPort: "vite" }
+              { name: "worker", port: 8080, targetPort: "worker" }
             ]
           }
         }
