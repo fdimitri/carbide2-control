@@ -2,6 +2,15 @@ Rails.application.routes.draw do
   devise_for :users, defaults: { format: :json }, skip: %i[registrations passwords confirmations unlocks]
 
   namespace :api, defaults: { format: :json } do
+    # Build/version provenance (public). `common` is the shape both the control
+    # plane and the workspace server implement identically; `control` adds
+    # control-only runtime detail. The client fetches these to fill in the SHAs
+    # it cannot bake itself.
+    namespace :v1 do
+      get 'common/version',  to: 'version#common'
+      get 'control/version', to: 'version#control'
+    end
+
     post '/login',  to: 'sessions#create'
     post '/signup', to: 'sessions#signup'
     delete '/logout', to: 'sessions#destroy'

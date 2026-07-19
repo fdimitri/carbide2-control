@@ -20,6 +20,15 @@ ENV LANG=C.UTF-8 \
     RAILS_LOG_TO_STDOUT=1 \
     BUNDLE_PATH=/usr/local/bundle
 
+# Build provenance — persisted as env for the /api/v1/*/version endpoints to
+# report at runtime. Supplied by scripts/build-all.sh as build-args.
+ARG META_SHA=unknown
+ARG CONTROL_SHA=unknown
+ARG BUILD_TIME=unknown
+ENV CARBIDE_META_SHA=$META_SHA \
+    CARBIDE_CONTROL_SHA=$CONTROL_SHA \
+    CARBIDE_BUILD_TIME=$BUILD_TIME
+
 # OS deps. libpq for pg gem; build tools for native extensions; git for any
 # git-based gems; tzdata for active_support.
 RUN apt-get update -qq && \
