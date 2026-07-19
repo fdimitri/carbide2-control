@@ -17,6 +17,14 @@ image:
   tag: dev
   pullPolicy: IfNotPresent
 
+# --- The Decider: client static tier ---
+# The dashboard SPA is not baked into the image; the loader fetches the pinned
+# build's index.html from the MinIO static tier over in-cluster HTTP. Browsers
+# load the assets via Traefik at /clients/<family>/<sha>/. Uploads are done by
+# scripts/build-client --mode control (see scripts/deploy.rb).
+clientTier:
+  url: "http://minio.carbide-system.svc.cluster.local:9000/clients"
+
 # --- Rails (dashboard / API) ---
 rails:
   enabled: true
