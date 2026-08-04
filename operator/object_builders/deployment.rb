@@ -1,7 +1,7 @@
 # operator/object_builders/deployment.rb
 #
-# The workspace pod itself: one container running foreman (rails + worker +
-# vite). Mirrors charts/workspace/templates/deployment.yaml in carbide2-server
+# The workspace pod itself: one container running foreman (rails + worker).
+# Mirrors charts/workspace/templates/deployment.yaml in carbide2-server
 # closely — keep the two in sync, or eventually delete that chart entirely
 # once the operator is the only path to a workspace.
 #
@@ -22,8 +22,6 @@ module Operator
         cluster_namespace = pg[:clusterNamespace] || pg["clusterNamespace"] || "carbide-system"
         cluster_name      = pg[:clusterName] || pg["clusterName"] || "carbide-pg"
         creds_secret      = pg[:credentialsSecret] || pg["credentialsSecret"] || "carbide-pg-app"
-        path_prefix       = ctx.ingress[:pathPrefix] || ctx.ingress["pathPrefix"] || "/w/#{ctx.project_id}"
-        public_port       = (ctx.ingress[:publicPort] || ctx.ingress["publicPort"] || 8080).to_i
 
         replicas = ctx.paused? ? 0 : 1
 
@@ -56,10 +54,9 @@ module Operator
                     imagePullPolicy: ctx.image_pull_policy,
                     ports: [
                       { name: "rails",  containerPort: 3000 },
-                      { name: "worker", containerPort: 8080 },
-                      { name: "vite",   containerPort: 5173 }
+                      { name: "worker", containerPort: 8080 }
                     ],
-                    env: env_vars(ctx, cluster_namespace, cluster_name, creds_secret, path_prefix, public_port),
+                    env: env_vars(ctx, cluster_namespace, cluster_name, creds_secret),
                     volumeMounts: [
                       { name: "files", mountPath: "/srv/projects" }
                     ],
@@ -117,14 +114,28 @@ module Operator
         containers
       end
 
-      def env_vars(ctx, pg_ns, pg_cluster, pg_secret, path_prefix, public_port)
+      def env_vars(ctx, pg_ns, pg_cluster, pg_secret)
         [
           { name: "WORKSPACE_PROJECT_ID", value: ctx.project_id.to_s },
           { name: "RAILS_ENV",           value: ENV.fetch("WORKSPACE_RAILS_ENV", "development") },
           { name: "PORT",                value: "3000" },
           { name: "WORKER_PORT",         value: "8080" },
-          { name: "VITE_PORT",           value: "5173" },
           { name: "PROJECTS_ROOT",       value: "/srv/projects" },
+
+          # The Decider: the workspace SPA is NOT baked into the image. The
+          # loader (SpaController / ClientRegistry) fetches the pinned build's
+          # index.html from the MinIO static tier over in-cluster HTTP; the
+          # browser loads the assets via Traefik at /clients/<family>/<sha>/.
+          {
+            name:  "CARBIDE_CLIENT_TIER_URL",
+            value: ENV.fetch("WORKSPACE_CLIENT_TIER_URL",
+                             "http://minio.carbide-system.svc.cluster.local:9000/clients")
+          },
+
+          # Persistent worker log on the files PVC: survives pod reaping/rollout
+          # so an overnight death stays debuggable (kubectl logs vanishes once
+          # the pod is gone). Timestamped + heartbeat; see worker/worker.rb.
+          { name: "CARBIDE_WORKER_LOG",  value: "/srv/projects/.carbide/worker.log" },
 
           # Postgres
           { name: "POSTGRES_HOST",       value: "#{pg_cluster}-rw.#{pg_ns}.svc.cluster.local" },
@@ -145,15 +156,9 @@ module Operator
             valueFrom: { secretKeyRef: { name: ctx.jwt_secret_name, key: "secret" } }
           },
 
-          # Vite (served behind the ingress, not stripped)
-          { name: "VITE_BASE",            value: "#{path_prefix}/" },
-          { name: "VITE_HMR_CLIENT_PORT", value: public_port.to_s },
-          { name: "VITE_API_PROXY",       value: "http://127.0.0.1:3000" },
-
-          # Host allowlist — wide for dev, override per cluster as needed.
-          # The public ingress host (from PUBLIC_URL_BASE, e.g.
-          # dev1.frankd.local) is appended automatically so the browser-facing
-          # hostname is always accepted by Rails 8 host authorization.
+          # Host allowlist. Defaults to "*" (accept any Host:) for dev — see
+          # workspace_dev_hosts. Set WORKSPACE_DEV_HOSTS to a comma-separated
+          # list to tighten per cluster.
           { name: "RAILS_DEV_HOSTS", value: workspace_dev_hosts },
 
           # Worker shell backend
@@ -168,17 +173,20 @@ module Operator
         ]
       end
 
-      # Comma-separated Rails host allowlist for the workspace pod. Starts from
-      # WORKSPACE_DEV_HOSTS (or a wide RFC-1918 default) and appends the public
-      # ingress host parsed from PUBLIC_URL_BASE (e.g. dev1.frankd.local), so
-      # the browser-facing hostname passes Rails 8 host authorization without
-      # per-cluster env tweaks.
+      # Comma-separated Rails host allowlist for the workspace pod. Defaults to
+      # "*" (accept any Host:) because the previous dev default was a set of
+      # RFC-1918 CIDRs, and a hostname Host: header (e.g. dev1.frankd.local) can
+      # never match an IP CIDR — so reaching a pod by name produced a 403
+      # "Blocked hosts" even though the LAN IP was allowlisted. Set
+      # WORKSPACE_DEV_HOSTS to a comma-separated list to tighten; when an
+      # explicit list is given the public ingress host parsed from
+      # PUBLIC_URL_BASE is appended for convenience.
       def workspace_dev_hosts
-        hosts = ENV.fetch("WORKSPACE_DEV_HOSTS",
-          "localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16," \
-          ".svc.cluster.local,.cluster.local").split(",").map(&:strip).reject(&:empty?)
+        configured = ENV.fetch("WORKSPACE_DEV_HOSTS", "*").strip
+        return "*" if configured.empty? || configured == "*"
 
-        base = ENV.fetch("PUBLIC_URL_BASE", "")
+        hosts = configured.split(",").map(&:strip).reject(&:empty?)
+        base  = ENV.fetch("PUBLIC_URL_BASE", "")
         unless base.empty?
           host = begin
             URI.parse(base).host

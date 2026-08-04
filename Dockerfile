@@ -6,37 +6,28 @@
 #
 # The Helm chart deploys two Deployments using the same image, each with a
 # different `command`. Locally, foreman runs both via Procfile.
-
-# --- Stage 1: build the dashboard SPA from the carbide2-client source.
 #
-# carbide2-control does NOT track a client commit hash (no submodule). The
-# meta-repo `carbide2` (which has all three components as submodules) is
-# the single source of truth for client versions and is responsible for
-# invoking docker build with the right context. Example:
-#
-#   docker build -t carbide2-control:dev \
-#       --build-context client=../carbide2-client \
-#       ./carbide2-control
-#
-# Requires BuildKit (`docker buildx` or DOCKER_BUILDKIT=1).
-FROM node:22-alpine AS dashboard-build
+# The dashboard SPA is NOT baked into this image. It lives only in the MinIO
+# static tier (built + uploaded by the meta-repo `scripts/build-client --mode
+# control`, and by deploy.rb) as the "carbide2-control" family, served at
+# /clients/carbide2-control/<sha>/. The Rails SpaController is a loader that
+# resolves + serves the pinned dashboard build's index.html at request time.
 
-WORKDIR /client
-COPY --from=client package.json package-lock.json* ./
-RUN npm ci --no-audit --progress=false
-
-COPY --from=client . ./
-# VITE_CARBIDE_MODE=control bakes the mode into the bundle so getApiUrl()
-# uses /api and DashboardPage routes "open project" to /w/<id>/.
-ENV VITE_CARBIDE_MODE=control
-RUN npm run build
-
-# --- Stage 2: Rails + operator runtime
+# --- Rails + operator runtime
 FROM ruby:3.4.2-slim
 
 ENV LANG=C.UTF-8 \
     RAILS_LOG_TO_STDOUT=1 \
     BUNDLE_PATH=/usr/local/bundle
+
+# Build provenance — persisted as env for the /api/v1/*/version endpoints to
+# report at runtime. Supplied by scripts/build-all.sh as build-args.
+ARG META_SHA=unknown
+ARG CONTROL_SHA=unknown
+ARG BUILD_TIME=unknown
+ENV CARBIDE_META_SHA=$META_SHA \
+    CARBIDE_CONTROL_SHA=$CONTROL_SHA \
+    CARBIDE_BUILD_TIME=$BUILD_TIME
 
 # OS deps. libpq for pg gem; build tools for native extensions; git for any
 # git-based gems; tzdata for active_support.
@@ -51,13 +42,6 @@ COPY Gemfile Gemfile.lock* ./
 RUN bundle install --jobs 4 --retry 3
 
 COPY . .
-
-# Drop the built dashboard SPA into Rails' public/ root. ActionDispatch
-# serves public/ before hitting the router, so /assets/<hash>.js etc. are
-# fetched as files, while /api/* and /users/* still reach Rails. A
-# catch-all route renders public/index.html so client-side Vue Router
-# history-mode paths (/login, /dashboard) reload cleanly.
-COPY --from=dashboard-build /client/dist/ /app/public/
 
 RUN bundle exec bootsnap precompile --gemfile app/ lib/ operator/ bin/ config/ 2>&1 || true
 

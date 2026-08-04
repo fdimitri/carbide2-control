@@ -12,10 +12,21 @@
 #   - StorageClass "local-path"
 #   - Workspace CRD installed (kubectl apply -f deploy/crd-workspace.yaml)
 
+# NOTE: in registry mode scripts/deploy.rb overrides image.repository/tag and the
+# workspace.* image fields below via `helm --set-string` with registry-prefixed
+# immutable SHA tags. The :dev defaults here are for standalone `helm install`.
 image:
   repository: carbide2-control
   tag: dev
   pullPolicy: IfNotPresent
+
+# --- The Decider: client static tier ---
+# The dashboard SPA is not baked into the image; the loader fetches the pinned
+# build's index.html from the MinIO static tier over in-cluster HTTP. Browsers
+# load the assets via Traefik at /clients/<family>/<sha>/. Uploads are done by
+# scripts/build-client --mode control (see scripts/deploy.rb).
+clientTier:
+  url: "http://minio.carbide-system.svc.cluster.local:9000/clients"
 
 # --- Rails (dashboard / API) ---
 rails:

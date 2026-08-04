@@ -46,6 +46,10 @@ spec:
             - { name: PORT,              value: "{{ .Values.rails.port }}" }
             - { name: CONTROL_NAMESPACE, value: "{{ .Values.controlNamespace }}" }
             - { name: PUBLIC_URL_BASE,   value: "{{ .Values.publicUrlBase }}" }
+            {{- /* The Decider: dashboard SPA is not baked into the image. The
+                   loader fetches the pinned build's index.html from the MinIO
+                   static tier over in-cluster HTTP. */}}
+            - { name: CARBIDE_CLIENT_TIER_URL, value: "{{ .Values.clientTier.url }}" }
             - { name: WORKSPACE_IMAGE,   value: "{{ .Values.workspace.image }}" }
             - { name: WORKSPACE_IMAGE_TAG, value: "{{ .Values.workspace.imageTag }}" }
             - { name: WORKSPACE_STORAGE_SIZE, value: "{{ .Values.workspace.storageSize }}" }

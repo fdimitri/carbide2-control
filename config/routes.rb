@@ -2,9 +2,21 @@ Rails.application.routes.draw do
   devise_for :users, defaults: { format: :json }, skip: %i[registrations passwords confirmations unlocks]
 
   namespace :api, defaults: { format: :json } do
+    # Build/version provenance (public). `common` is the shape both the control
+    # plane and the workspace server implement identically; `control` adds
+    # control-only runtime detail. The client fetches these to fill in the SHAs
+    # it cannot bake itself.
+    namespace :v1 do
+      get 'common/version',  to: 'version#common'
+      get 'control/version', to: 'version#control'
+    end
+
     post '/login',  to: 'sessions#create'
     post '/signup', to: 'sessions#signup'
     delete '/logout', to: 'sessions#destroy'
+
+    # Available SPA client builds for the dashboard picker (public).
+    resources :clients, only: [:index]
 
     resources :workspaces, only: [:index, :show, :create, :destroy] do
       member do
@@ -17,11 +29,12 @@ Rails.application.routes.draw do
   get 'up' => 'rails/health#show', as: :rails_health_check
 
   # SPA fallback — must be LAST. Catches any other GET that wasn't matched
-  # above (e.g. /login, /preferences) and returns public/index.html so
-  # Vue Router's history mode can handle the route client-side. Asset URLs
-  # under /assets/* are served by public_file_server before reaching here.
+  # above (e.g. /login, /preferences) and returns the pinned dashboard build's
+  # index.html so Vue Router's history mode can handle the route client-side.
+  # Asset URLs under /assets/* and /clients/* are served by the static tier
+  # before reaching here.
   get '*path', to: 'spa#show', constraints: ->(req) {
-    !req.path.start_with?('/api', '/users', '/rails', '/assets', '/up')
+    !req.path.start_with?('/api', '/users', '/rails', '/assets', '/clients', '/up')
   }
   root to: 'spa#show'
 end
