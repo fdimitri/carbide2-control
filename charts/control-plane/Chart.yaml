@@ -5,8 +5,8 @@ description: |
   once per cluster. Provisions per-workspace pods (carbide2-server) on demand
   via the Workspace Custom Resource.
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.3.1
+appVersion: "0.3.1-letigre++"
 home: https://github.com/fdimitri/carbide2-control
 sources:
   - https://github.com/fdimitri/carbide2-control
