@@ -11,17 +11,23 @@
 
 module CarbideControl
   module JwtIssuer
-    ISSUER      = 'carbide-control'.freeze
-    DEFAULT_TTL = Integer(ENV.fetch('WORKSPACE_TOKEN_TTL', '300'))  # seconds
+    ISSUER = 'carbide-control'.freeze
+
+    # TTL is a durable control-side setting (ADR-015), read at mint time with a
+    # short cache; WORKSPACE_TOKEN_TTL env is bootstrap-only.
+    TTL_SETTING_KEY = 'workspace_token_ttl'.freeze
 
     SCOPES     = %w[workspace:rw workspace:api].freeze
-    SCOPE_TTLS = SCOPES.to_h { |s| [s, DEFAULT_TTL] }.freeze
 
     module_function
 
+    def workspace_token_ttl
+      Setting.get(TTL_SETTING_KEY, default: 300, env: 'WORKSPACE_TOKEN_TTL')
+    end
+
     def issue!(user:, project:, scope: 'workspace:rw')
-      raise ArgumentError, "unknown scope #{scope.inspect}" unless SCOPE_TTLS.key?(scope)
-      ttl = SCOPE_TTLS.fetch(scope)
+      raise ArgumentError, "unknown scope #{scope.inspect}" unless SCOPES.include?(scope)
+      ttl = workspace_token_ttl
       now = Time.now.to_i
       payload = {
         iss:        ISSUER,
