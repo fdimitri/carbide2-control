@@ -101,6 +101,7 @@ class Api::WorkspacesController < ApplicationController
     cr = CarbideControl::WorkspaceApi.get(workspace) rescue nil
     {
       id:           workspace.id,
+      uuid:         workspace.uuid,
       name:         workspace.name,
       status:       cr&.dig(:status, :phase)&.downcase || workspace.status,
       url:          cr&.dig(:status, :url) || (workspace.status == 'ready' ? workspace_url(workspace) : nil),
