@@ -12,7 +12,7 @@ class ApplicationController < ActionController::API
     if auth =~ /\ABearer\s+(.+)\z/
       token = Regexp.last_match(1)
       begin
-        payload, = JWT.decode(token, CARBIDE_JWT_SECRET, true, { algorithm: 'HS256' })
+        payload, = JWT.decode(token, CarbideControl::JwtSigningKey.private_key.public_key, true, { algorithm: 'RS256' })
         @current_user = User.find_by(id: payload['user_id']) if payload['scope'] == 'control:user'
       rescue JWT::DecodeError, JWT::ExpiredSignature
         @current_user = nil

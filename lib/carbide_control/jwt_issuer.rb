@@ -11,7 +11,6 @@
 
 module CarbideControl
   module JwtIssuer
-    ALGORITHM   = 'HS256'.freeze
     ISSUER      = 'carbide-control'.freeze
     DEFAULT_TTL = Integer(ENV.fetch('WORKSPACE_TOKEN_TTL', '300'))  # seconds
 
@@ -41,7 +40,7 @@ module CarbideControl
         workspace_uuid: project.uuid,
         project_uuid:   project.uuid
       }
-      JWT.encode(payload, CARBIDE_JWT_SECRET, ALGORITHM)
+      JWT.encode(payload, CarbideControl::JwtSigningKey.private_key, 'RS256', { kid: CarbideControl::JwtSigningKey.kid })
     end
   end
 end

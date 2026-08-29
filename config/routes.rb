@@ -1,6 +1,9 @@
 Rails.application.routes.draw do
   devise_for :users, defaults: { format: :json }, skip: %i[registrations passwords confirmations unlocks]
 
+  # Public JWKS for workspace pods to verify control-minted tokens (ADR-015).
+  get '/.well-known/jwks.json', to: 'well_known/jwks#show'
+
   namespace :api, defaults: { format: :json } do
     # Build/version provenance (public). `common` is the shape both the control
     # plane and the workspace server implement identically; `control` adds

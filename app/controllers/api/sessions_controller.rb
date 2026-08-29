@@ -49,7 +49,7 @@ class Api::SessionsController < ApplicationController
       user_id: user.id,
       scope:   'control:user'
     }
-    JWT.encode(payload, CARBIDE_JWT_SECRET, 'HS256')
+    JWT.encode(payload, CarbideControl::JwtSigningKey.private_key, 'RS256', { kid: CarbideControl::JwtSigningKey.kid })
   end
 
   def user_json(user)

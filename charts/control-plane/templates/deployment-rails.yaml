@@ -71,7 +71,7 @@ spec:
               valueFrom: { secretKeyRef: { name: {{ .Values.postgres.credentialsSecret }}, key: username } }
             - name: POSTGRES_PASSWORD
               valueFrom: { secretKeyRef: { name: {{ .Values.postgres.credentialsSecret }}, key: password } }
-            - name: CARBIDE_JWT_SECRET
+            - name: JWT_SIGNING_KEY
               valueFrom: { secretKeyRef: { name: {{ .Values.jwt.secretName }}, key: secret } }
           readinessProbe:
             httpGet: { path: /up, port: http }
