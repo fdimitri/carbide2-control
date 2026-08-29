@@ -24,11 +24,9 @@ module CarbideControl
       now = Time.now.to_i
       payload = {
         iss:        ISSUER,
-        sub:        "user:#{user.id}",
         aud:        AUDIENCE,
         iat:        now,
         exp:        now + TTL,
-        user_id:    user.id,
         user_uuid:  user.uuid,
         scope:      SCOPE,
         auth_time:  auth_time || now

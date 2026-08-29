@@ -31,17 +31,12 @@ module CarbideControl
       now = Time.now.to_i
       payload = {
         iss:        ISSUER,
-        sub:        "user:#{user.id}",
-        aud:        "workspace:#{project.id}",
         iat:        now,
         exp:        now + ttl,
-        user_id:    user.id,
         user_email: user.email,
-        project_id: project.id,
         scope:      scope,
-        # Stable identities (ADR-015). project == workspace under 1:1, so
-        # project_uuid and workspace_uuid are the same value today; they
-        # diverge when a workspace hosts multiple projects.
+        # Stable identities (ADR-015): never pod-local integers. project ==
+        # workspace under 1:1, so project_uuid == workspace_uuid today.
         user_uuid:      user.uuid,
         workspace_uuid: project.uuid,
         project_uuid:   project.uuid
