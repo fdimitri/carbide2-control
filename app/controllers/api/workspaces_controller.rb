@@ -62,6 +62,7 @@ class Api::WorkspacesController < ApplicationController
     render json: {
       token: token,
       workspace_id: workspace.id,
+      workspace_uuid: workspace.uuid,
       url: workspace_url(workspace),
       scope: scope,
       user: { id: current_user.id, email: current_user.email }
