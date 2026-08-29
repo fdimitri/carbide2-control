@@ -14,6 +14,8 @@ Rails.application.routes.draw do
       get 'control/version', to: 'version#control'
       # Authenticated identity for THIS app's users table (control-local id).
       get 'control/me',      to: 'me#show'
+      # Renew the login token (sliding, with the session ceiling).
+      post 'control/renew',  to: 'sessions#renew'
       # Control-side user + settings inspection/editing (no authz yet).
       resources :users,    only: [:show]
       resources :settings, only: [:index, :update]
