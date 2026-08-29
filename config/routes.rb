@@ -9,6 +9,8 @@ Rails.application.routes.draw do
     namespace :v1 do
       get 'common/version',  to: 'version#common'
       get 'control/version', to: 'version#control'
+      # Authenticated identity for THIS app's users table (control-local id).
+      get 'control/me',      to: 'me#show'
     end
 
     post '/login',  to: 'sessions#create'
