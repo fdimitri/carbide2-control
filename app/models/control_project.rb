@@ -20,6 +20,10 @@ class ControlProject < ApplicationRecord
 
   after_initialize { self.status ||= 'pending' }
 
+  # Stable control-side identity (the workspace uuid; == project uuid under
+  # 1:1), carried in tokens as workspace_uuid/project_uuid.
+  before_validation :assign_uuid, on: :create
+
   # Derived names. Kept here (not in the operator) so Rails can render URLs
   # without consulting the cluster. The operator MUST honor the same scheme.
   def namespace_name
@@ -32,5 +36,11 @@ class ControlProject < ApplicationRecord
 
   def ingress_path_prefix
     "/w/#{id}"
+  end
+
+  private
+
+  def assign_uuid
+    self.uuid ||= SecureRandom.uuid
   end
 end

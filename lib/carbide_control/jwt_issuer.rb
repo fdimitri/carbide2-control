@@ -33,7 +33,13 @@ module CarbideControl
         user_id:    user.id,
         user_email: user.email,
         project_id: project.id,
-        scope:      scope
+        scope:      scope,
+        # Stable identities (ADR-015). project == workspace under 1:1, so
+        # project_uuid and workspace_uuid are the same value today; they
+        # diverge when a workspace hosts multiple projects.
+        user_uuid:      user.uuid,
+        workspace_uuid: project.uuid,
+        project_uuid:   project.uuid
       }
       JWT.encode(payload, CARBIDE_JWT_SECRET, ALGORITHM)
     end
