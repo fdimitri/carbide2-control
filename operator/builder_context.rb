@@ -53,10 +53,6 @@ module Operator
       "carbide_workspace_#{project_id}"
     end
 
-    def jwt_secret_name
-      "workspace-jwt"
-    end
-
     def ingress
       spec[:ingress] || spec["ingress"] || {}
     end

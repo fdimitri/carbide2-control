@@ -80,7 +80,7 @@ shell-outs.
 │           ├── service.yaml
 │           ├── ingressroute.yaml
 │           ├── database.yaml               CNPG Database CR: carbide_control
-│           └── jwt-secret.yaml             shared with workspaces
+│           └── jwt-secret.yaml             RSA signing key for control (not shared)
 ├── deploy/
 │   └── crd-workspace.yaml                  THE Workspace CRD. The contract.
 ├── config/
@@ -145,9 +145,9 @@ copy of `JWT_CLAIMS.md`; keep them in sync by hand.
 }
 ```
 
-Signed with HS256 against a shared secret stored in the K8s Secret
-`workspace-jwt` (mirrored into every `ws-N` namespace at provision time by the
-operator).
+Signed with RS256 against an RSA key held only by the control plane (the
+`workspace-jwt` Secret). Workspace pods verify with the public key fetched from
+`/.well-known/jwks.json`; nothing is mirrored into their namespaces.
 
 ## Status
 

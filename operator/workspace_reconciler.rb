@@ -18,7 +18,6 @@ require "object_builders/namespace"
 require "object_builders/serviceaccount"
 require "object_builders/rbac"
 require "object_builders/pvc"
-require "object_builders/jwt_secret"
 require "object_builders/database"
 require "object_builders/service"
 require "object_builders/ingressroute"
@@ -27,7 +26,6 @@ require "object_builders/deployment"
 module Operator
   class WorkspaceReconciler
     FINALIZER = "carbide.dev/workspace-cleanup".freeze
-    JWT_SOURCE_SECRET = ENV.fetch("JWT_SOURCE_SECRET", "workspace-jwt").freeze
     IMMUTABLE_SPEC_KINDS = %i[persistent_volume_claim].freeze
 
     def initialize(logger:, namespace:)
@@ -161,9 +159,7 @@ module Operator
       redir_mw = ObjectBuilders::IngressRoute.redirect_middleware(ctx)
       redir_ir = ObjectBuilders::IngressRoute.redirect_route(ctx)
       dep    = ObjectBuilders::Deployment.build(ctx)
-      secret = ObjectBuilders::JwtSecret.build(ctx, data: fetch_jwt_secret_data)
 
-      apply!(KubeClient.core,    :secret,                 secret)
       apply!(KubeClient.core,    :service_account,        sa)
       apply!(KubeClient.rbac,    :role,                   role)
       apply!(KubeClient.rbac,    :role_binding,           rb)
@@ -286,12 +282,6 @@ module Operator
       base = ENV.fetch("PUBLIC_URL_BASE", "http://localhost:8080")
       path = ctx.ingress[:pathPrefix] || ctx.ingress["pathPrefix"] || "/w/#{ctx.project_id}"
       "#{base}#{path}/"
-    end
-
-    def fetch_jwt_secret_data
-      src_ns = ENV.fetch("CONTROL_NAMESPACE", "carbide-system")
-      secret = KubeClient.core.get_secret(JWT_SOURCE_SECRET, src_ns)
-      secret.data.to_h
     end
   end
 end

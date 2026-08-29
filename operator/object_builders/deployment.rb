@@ -151,18 +151,13 @@ module Operator
             valueFrom: { secretKeyRef: { name: pg_secret, key: "password" } }
           },
 
-          # JWT — control now signs RS256 and publishes its public key at the
-          # JWKS endpoint; the pod verifies against that (ADR-015). The shared
-          # secret (WORKER_JWT_SECRET) is retained only for the seed job's
-          # legacy references and can be dropped once they're gone.
+          # JWT — control signs RS256 and publishes its public key at the JWKS
+          # endpoint; the pod verifies against that (ADR-015). No shared secret
+          # is mirrored into the pod.
           {
             name: "CONTROL_JWKS_URL",
             value: ENV.fetch("CONTROL_JWKS_URL",
                              "http://control-plane.carbide-system.svc.cluster.local:3001/.well-known/jwks.json")
-          },
-          {
-            name: "WORKER_JWT_SECRET",
-            valueFrom: { secretKeyRef: { name: ctx.jwt_secret_name, key: "secret" } }
           },
 
           # Host allowlist. Defaults to "*" (accept any Host:) for dev — see
