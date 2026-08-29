@@ -31,6 +31,8 @@ module CarbideControl
       now = Time.now.to_i
       payload = {
         iss:        ISSUER,
+        sub:        user.uuid,
+        aud:        "workspace:#{project.uuid}",
         iat:        now,
         exp:        now + ttl,
         user_email: user.email,

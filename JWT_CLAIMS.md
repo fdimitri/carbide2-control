@@ -20,6 +20,8 @@ token's own `alg` claim (no alg-confusion).
 | Claim        | Type    | Example                  | Notes                                                     |
 | ------------ | ------- | ------------------------ | --------------------------------------------------------- |
 | `iss`        | string  | `carbide-control`        | Constant. Workspace rejects tokens with any other issuer. |
+| `sub`        | string  | `<user_uuid>`            | Subject (the user's stable uuid).                        |
+| `aud`        | string  | `workspace:<uuid>`       | Audience (the workspace's stable uuid). Workspace rejects mismatch. |
 | `exp`        | integer | `1733184000`             | Unix seconds. Recommended TTL: 5 minutes.                 |
 | `iat`        | integer | `1733183700`             | Unix seconds.                                             |
 | `user_email` | string  | `alice@example.com`      | Denormalized for display + audit.                         |
@@ -28,7 +30,8 @@ token's own `alg` claim (no alg-confusion).
 | `project_uuid`   | string | `<uuid>`              | Stable control-side project identity (== workspace_uuid under 1:1). |
 | `scope`      | string  | `workspace:rw` / `workspace:api` | `workspace:rw` authorizes the worker WS; `workspace:api` authorizes the workspace REST API. Scope selects the token's TTL. |
 
-No integer claims (`sub`/`aud`/`user_id`/`project_id`). Identity is uuid-only.
+No integer identity claims (`user_id`/`project_id`). `sub` and `aud` carry
+uuids, never pod-local integers.
 
 
 ## Validation rules (workspace side)
@@ -37,8 +40,9 @@ The workspace verifies, in order:
 
 1. Signature valid against the JWKS public key named by the token's `kid`.
 2. `iss == "carbide-control"`.
-3. `exp > now`.
-4. `scope` is in the allowlist `[workspace:rw, workspace:api]`.
+3. `aud == "workspace:#{ENV['WORKSPACE_PROJECT_UUID']}"`.
+4. `exp > now`.
+5. `scope` is in the allowlist `[workspace:rw, workspace:api]`.
 
 Failing any check returns 401 from the WS upgrade and the connection is closed
 before any worker command is processed.
