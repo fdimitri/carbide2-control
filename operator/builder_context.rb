@@ -27,6 +27,10 @@ module Operator
       Integer(spec[:projectId] || spec["projectId"])
     end
 
+    def project_uuid
+      spec[:projectUuid] || spec["projectUuid"]
+    end
+
     # Derived names. Must match ControlProject#namespace_name etc on the
     # Rails side — these are the source of truth for the operator.
     def workspace_namespace

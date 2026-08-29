@@ -117,6 +117,7 @@ module Operator
       def env_vars(ctx, pg_ns, pg_cluster, pg_secret)
         [
           { name: "WORKSPACE_PROJECT_ID", value: ctx.project_id.to_s },
+          { name: "WORKSPACE_PROJECT_UUID", value: ctx.project_uuid.to_s },
           { name: "RAILS_ENV",           value: ENV.fetch("WORKSPACE_RAILS_ENV", "development") },
           { name: "PORT",                value: "3000" },
           { name: "WORKER_PORT",         value: "8080" },

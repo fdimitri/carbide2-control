@@ -51,6 +51,7 @@ module CarbideControl
         },
         spec: {
           projectId:       project.id,
+          projectUuid:     project.uuid,
           ownerEmail:      project.owner.email,
           workspaceImage:  ENV.fetch('WORKSPACE_IMAGE', 'carbide2'),
           workspaceImageTag: ENV.fetch('WORKSPACE_IMAGE_TAG', 'dev'),
