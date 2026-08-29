@@ -24,7 +24,7 @@ so the workspace pod can verify tokens minted by the control plane.
 | `user_id`    | integer | `42`                     | Control-plane DB primary key. Workspace uses for denormalized membership cache. |
 | `user_email` | string  | `alice@example.com`      | Denormalized for display + audit.                         |
 | `project_id` | integer | `42`                     | Must match `aud` suffix and the workspace pod's `WORKSPACE_PROJECT_ID` env. |
-| `scope`      | string  | `workspace:rw`           | Currently always `workspace:rw`. Reserved for future read-only / agent-only scopes. |
+| `scope`      | string  | `workspace:rw` / `workspace:api` | `workspace:rw` authorizes the worker WS; `workspace:api` authorizes the workspace REST API. Scope selects the token's TTL. |
 
 ## Validation rules (workspace side)
 
@@ -36,7 +36,7 @@ The workspace verifies, in order:
 4. `exp > now`.
 5. `project_id == ENV['WORKSPACE_PROJECT_ID'].to_i`.
 6. `user_id` is a positive integer.
-7. `scope` is in the allowlist `[workspace:rw]`.
+7. `scope` is in the allowlist `[workspace:rw, workspace:api]`.
 
 Failing any check returns 401 from the WS upgrade and the connection is closed
 before any worker command is processed.

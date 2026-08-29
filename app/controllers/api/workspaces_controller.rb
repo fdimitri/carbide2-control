@@ -52,15 +52,18 @@ class Api::WorkspacesController < ApplicationController
   end
 
   # POST /api/workspaces/:id/token
-  # Returns the short-lived per-workspace JWT the SPA presents to the
-  # workspace pod when bootstrapping its session.
+  # Returns a short-lived per-workspace JWT for the requested scope. The SPA
+  # presents a workspace:rw token to the worker and a workspace:api token to the
+  # workspace REST API. Scope selects the TTL (see CarbideControl::JwtIssuer).
   def token
     workspace = find_workspace
-    token = CarbideControl::JwtIssuer.issue!(user: current_user, project: workspace)
+    scope = CarbideControl::JwtIssuer::SCOPES.include?(params[:scope]) ? params[:scope] : 'workspace:rw'
+    token = CarbideControl::JwtIssuer.issue!(user: current_user, project: workspace, scope: scope)
     render json: {
       token: token,
       workspace_id: workspace.id,
       url: workspace_url(workspace),
+      scope: scope,
       user: { id: current_user.id, email: current_user.email }
     }
   end
