@@ -96,5 +96,13 @@ module CarbideControl
     rescue Kubeclient::ResourceNotFoundError
       nil
     end
+
+    # Merge-patch the Workspace CR (spec-level changes only — never status).
+    # Used by the control-side backfill to add fields to existing CRs.
+    def self.merge_patch(project, patch)
+      client.merge_patch_workspace(project.release_name, patch, CR_NAMESPACE)
+    rescue Kubeclient::ResourceNotFoundError
+      nil
+    end
   end
 end
