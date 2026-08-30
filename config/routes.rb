@@ -19,6 +19,14 @@ Rails.application.routes.draw do
       # Control-side user + settings inspection/editing (no authz yet).
       resources :users,    only: [:show]
       resources :settings, only: [:index, :update]
+
+      # In-session passkey management (ADR-021).
+      namespace :webauthn do
+        post 'registration/begin',    to: 'webauthn#registration_begin'
+        post 'registration/complete', to: 'webauthn#registration_complete'
+      end
+      get    'webauthn/credentials',     to: 'webauthn#index'
+      delete 'webauthn/credentials/:id', to: 'webauthn#destroy'
     end
 
     post '/login',  to: 'sessions#create'

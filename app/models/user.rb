@@ -3,6 +3,7 @@ class User < ApplicationRecord
 
   has_many :project_memberships, dependent: :destroy
   has_many :control_projects, through: :project_memberships
+  has_many :webauthn_credentials, dependent: :destroy
 
   # Stable control-side identity, carried in the token's sub claim (user:<uuid>).
   # Local integer PKs never leave the DB.
