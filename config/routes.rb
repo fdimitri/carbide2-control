@@ -25,6 +25,10 @@ Rails.application.routes.draw do
       post   'webauthn/registration/complete', to: 'webauthn#registration_complete'
       get    'webauthn/credentials',           to: 'webauthn#index'
       delete 'webauthn/credentials/:id',       to: 'webauthn#destroy'
+
+      # Passkey login (unauthenticated assertion ceremony).
+      post   'webauthn/assertion/begin',    to: 'webauthn_login#assertion_begin'
+      post   'webauthn/assertion/complete', to: 'webauthn_login#assertion_complete'
     end
 
     post '/login',  to: 'sessions#create'
