@@ -2,6 +2,8 @@
 #
 # Registration is the only ceremony wired in this slice. Assertion (login) is
 # deferred to the login-screen work and is intentionally absent here.
+require 'base64'
+
 class Api::V1::WebauthnController < ApplicationController
   # GET /api/v1/webauthn/credentials
   def index
@@ -12,43 +14,34 @@ class Api::V1::WebauthnController < ApplicationController
 
   # POST /api/v1/webauthn/registration/begin
   def registration_begin
-    challenge = WebauthnChallenge.issue!(ttl: CarbideControl::WebauthnConfig.challenge_ttl)
-
-    options = webauthn_credential_options.create(
+    options = WebAuthn::Credential.options_for_create(
       user: {
         id: webauthn_user_id(current_user),
         name: current_user.email,
         display_name: current_user.email
       },
-      challenge: challenge.challenge,
       exclude: current_user.webauthn_credentials.map(&:external_id),
       authenticator_selection: {
         authenticator_attachment: 'cross-platform',
         user_verification: 'preferred',
-        resident_key: 'preferred'  # non-resident is acceptable; don't force discoverable
+        resident_key: 'preferred'
       },
       attestation: 'none'
     )
 
-    render json: { challenge: challenge.challenge, options: options.as_json }
+    WebauthnChallenge.issue!(challenge: options.challenge)
+
+    render json: { challenge: options.challenge, options: options.as_json }
   end
 
   # POST /api/v1/webauthn/registration/complete
   def registration_complete
-    challenge = params[:challenge]
-    credential_json = params[:credential]
-
-    stored = WebauthnChallenge.unexpired.find_by(challenge: challenge)
+    stored = WebauthnChallenge.unexpired.find_by(challenge: params[:challenge])
     return render json: { error: 'challenge not found or expired' }, status: :bad_request unless stored
 
     begin
-      credential = WebAuthn::Credential.from_create(credential_json)
-      credential.verify(
-        stored.challenge,
-        rp_id: CarbideControl::WebauthnConfig.rp_id,
-        origin: CarbideControl::WebauthnConfig.origin,
-        attestation: 'none'
-      )
+      credential = WebAuthn::Credential.from_create(params[:credential])
+      credential.verify(stored.challenge)
     rescue WebAuthn::Error => e
       return render json: { error: "verification failed: #{e.message}" }, status: :unprocessable_entity
     end
@@ -77,13 +70,11 @@ class Api::V1::WebauthnController < ApplicationController
 
   private
 
-  def webauthn_credential_options
-    WebAuthn::Credential.options_for_create
-  end
-
+  # Stable, opaque user handle (<= 64 bytes). The gem serializes this as-is and
+  # the client decodes it as base64url, so we must emit a base64url string. We
+  # derive it deterministically from the user's stable uuid rather than adding a
+  # separate webauthn_id column.
   def webauthn_user_id(user)
-    # A stable, opaque user handle (max 64 bytes). We use the uuid; it's stable
-    # and already the cross-DB identity.
-    user.uuid.bytes.first(64).pack('C*')
+    Base64.urlsafe_encode64(user.uuid, padding: false)
   end
 end

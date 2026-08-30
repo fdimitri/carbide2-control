@@ -8,8 +8,8 @@ class WebauthnChallenge < ApplicationRecord
 
   scope :unexpired, -> { where(consumed: false).where('expires_at > ?', Time.current) }
 
-  def self.issue!(ttl: 5.minutes)
-    create!(challenge: SecureRandom.base64(32), expires_at: Time.current + ttl)
+  def self.issue!(challenge:, ttl: 5.minutes)
+    create!(challenge: challenge, expires_at: Time.current + ttl)
   end
 
   def consume!
