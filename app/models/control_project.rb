@@ -21,7 +21,7 @@ class ControlProject < ApplicationRecord
   after_initialize { self.status ||= 'pending' }
 
   # Stable control-side identity (the workspace uuid; == project uuid under
-  # 1:1), carried in tokens as workspace_uuid/project_uuid.
+  # 1:1), carried in the token's aud/project_uuid claims.
   before_validation :assign_uuid, on: :create
 
   # Derived names. Kept here (not in the operator) so Rails can render URLs

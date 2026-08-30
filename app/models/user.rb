@@ -4,8 +4,8 @@ class User < ApplicationRecord
   has_many :project_memberships, dependent: :destroy
   has_many :control_projects, through: :project_memberships
 
-  # Stable control-side identity, carried in tokens as user_uuid. Local integer
-  # PKs never leave the DB.
+  # Stable control-side identity, carried in the token's sub claim (user:<uuid>).
+  # Local integer PKs never leave the DB.
   before_validation :assign_uuid, on: :create
 
   private

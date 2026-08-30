@@ -14,7 +14,9 @@ class ApplicationController < ActionController::API
       begin
         @current_token_payload, = JWT.decode(token, CarbideControl::JwtSigningKey.private_key.public_key, true, { algorithm: 'RS256' })
         if @current_token_payload['scope'] == 'control:user'
-          @current_user = @current_token_payload['user_uuid'] && User.find_by(uuid: @current_token_payload['user_uuid'])
+          sub = @current_token_payload['sub'].to_s
+          uuid = sub.start_with?('user:') ? sub.delete_prefix('user:') : nil
+          @current_user = uuid && User.find_by(uuid: uuid)
         end
       rescue JWT::DecodeError, JWT::ExpiredSignature
         @current_user = nil

@@ -31,17 +31,15 @@ module CarbideControl
       now = Time.now.to_i
       payload = {
         iss:        ISSUER,
-        sub:        user.uuid,
+        sub:        "user:#{user.uuid}",
         aud:        "workspace:#{project.uuid}",
         iat:        now,
         exp:        now + ttl,
         user_email: user.email,
         scope:      scope,
-        # Stable identities (ADR-015): never pod-local integers. project ==
-        # workspace under 1:1, so project_uuid == workspace_uuid today.
-        user_uuid:      user.uuid,
-        workspace_uuid: project.uuid,
-        project_uuid:   project.uuid
+        # project_uuid is the only custom identity claim left (project has no
+        # standard claim home). user/workspace identity live in sub/aud.
+        project_uuid: project.uuid
       }
       JWT.encode(payload, CarbideControl::JwtSigningKey.private_key, 'RS256', { kid: CarbideControl::JwtSigningKey.kid })
     end
