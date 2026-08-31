@@ -57,7 +57,9 @@ spec:
             - { name: WORKSPACE_SHELL_IMAGE, value: "{{ .Values.workspace.shellImage }}" }
             - { name: INGRESS_PUBLIC_PORT, value: "{{ .Values.ingress.publicPort }}" }
             - { name: REGISTRY_URL, value: "{{ .Values.registry.url }}" }
-            - { name: REGISTRY_CA,  value: "{{ .Values.registry.ca }}" }
+            - name: REGISTRY_CA
+              value: |-
+                {{- .Values.registry.ca | nindent 4 }}
             {{- /* Derive the public hostname from publicUrlBase (strip scheme + port)
                    and append it to the dev host allowlist so the ingress FQDN
                    (e.g. dev1.frankd.local) passes Rails 8 host authorization. */}}
