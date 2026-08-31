@@ -183,7 +183,8 @@ class Api::V1::Control::WorkspacesController < ApplicationController
     case obj
     when Hash then obj.each_with_object({}) { |(k, v), h| h[k.to_sym] = deep_symbolize(v) }
     when Array then obj.map { |v| deep_symbolize(v) }
-    else obj
+    else
+      obj.respond_to?(:to_h) ? deep_symbolize(obj.to_h) : obj
     end
   end
 end
