@@ -1,7 +1,7 @@
 # Dashboard CRUD for Workspaces (top-level control-plane resource), plus the
 # per-workspace JWT minting endpoint that the workspace pod will receive on
 # WS connect. Backed by the ControlProject model (legacy table name).
-class Api::WorkspacesController < ApplicationController
+class Api::V1::Control::WorkspacesController < ApplicationController
   def index
     workspaces = current_user.control_projects.order(created_at: :desc)
     render json: workspaces.map { |w| workspace_json(w) }

@@ -29,6 +29,15 @@ Rails.application.routes.draw do
       # Passkey login (unauthenticated assertion ceremony).
       post   'webauthn/assertion/begin',    to: 'webauthn_login#assertion_begin'
       post   'webauthn/assertion/complete', to: 'webauthn_login#assertion_complete'
+
+      # Workspaces — control-plane resource (relocated from /api/workspaces).
+      resources :workspaces, only: [:index, :show, :create, :destroy],
+                controller: 'control/workspaces' do
+        member do
+          post :token
+          get  :health
+        end
+      end
     end
 
     post '/login',  to: 'sessions#create'
@@ -37,13 +46,6 @@ Rails.application.routes.draw do
 
     # Available SPA client builds for the dashboard picker (public).
     resources :clients, only: [:index]
-
-    resources :workspaces, only: [:index, :show, :create, :destroy] do
-      member do
-        post :token   # mint per-workspace JWT for workspace pod bootstrap
-        get  :health  # active reachability probe (rails + worker WS)
-      end
-    end
   end
 
   get 'up' => 'rails/health#show', as: :rails_health_check
