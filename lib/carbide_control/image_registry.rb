@@ -59,11 +59,10 @@ module CarbideControl
         if pem.empty?
           nil
         else
-          require 'tempfile'
-          f = Tempfile.new(['carbide-registry-ca', '.pem'])
-          f.write(pem)
-          f.flush
-          f.path
+          require 'tmpdir'
+          path = File.join(Dir.tmpdir, 'carbide-registry-ca.pem')
+          File.write(path, pem) unless File.exist?(path)
+          path
         end
       end
     end
