@@ -41,30 +41,14 @@ module CarbideControl
       uri  = URI.parse("#{base_url}#{path}")
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = (uri.scheme == 'https')
-      http.ca_file = registry_ca_file if http.use_ssl? && registry_ca_file
+      # Trust the self-signed registry via the SYSTEM trust store: the container
+      # entrypoint installs REGISTRY_CA into /usr/local/share/ca-certificates and
+      # runs update-ca-certificates (ADR-025). No per-client ca_file needed.
       req  = Net::HTTP::Get.new(uri.request_uri)
       resp = http.request(req)
       raise "registry #{path} returned #{resp.code}" unless resp.is_a?(Net::HTTPSuccess)
 
       JSON.parse(resp.body)
-    end
-
-    # REGISTRY_CA is the PEM text; Net::HTTP wants a ca_file path. Write it to a
-    # temp file once and reuse (the env is stable for the pod lifetime). A
-    # single-file CA bundle is the only correct way to trust a self-signed
-    # registry root — X509::Store#add_cert does NOT make a cert a trust anchor.
-    def registry_ca_file
-      @registry_ca_file ||= begin
-        pem = ENV['REGISTRY_CA'].to_s.strip
-        if pem.empty?
-          nil
-        else
-          require 'tmpdir'
-          path = File.join(Dir.tmpdir, 'carbide-registry-ca.pem')
-          File.write(path, pem) unless File.exist?(path)
-          path
-        end
-      end
     end
   end
 end

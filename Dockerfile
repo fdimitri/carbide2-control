@@ -33,7 +33,7 @@ ENV CARBIDE_META_SHA=$META_SHA \
 # git-based gems; tzdata for active_support.
 RUN apt-get update -qq && \
     apt-get install -y --no-install-recommends \
-      build-essential libpq-dev libyaml-dev tzdata git curl && \
+      build-essential libpq-dev libyaml-dev tzdata git curl ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

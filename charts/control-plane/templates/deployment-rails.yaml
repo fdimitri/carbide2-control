@@ -38,7 +38,18 @@ spec:
         - name: rails
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: [bundle, exec, rails, server, -b, "0.0.0.0", -p, "{{ .Values.rails.port }}"]
+          # Install the self-signed registry CA (if provided) into the system
+          # trust store, then exec Rails. This makes Net::HTTP/curl trust the
+          # registry without a per-client ca_file special-case (ADR-025).
+          command:
+            - bash
+            - -c
+            - |
+              if [ -n "$REGISTRY_CA" ]; then
+                echo "$REGISTRY_CA" > /usr/local/share/ca-certificates/carbide-registry.crt
+                update-ca-certificates
+              fi
+              exec bundle exec rails server -b 0.0.0.0 -p {{ .Values.rails.port }}
           ports:
             - { name: http, containerPort: {{ .Values.rails.port }} }
           env:
