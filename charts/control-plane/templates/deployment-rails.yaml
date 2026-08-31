@@ -59,7 +59,7 @@ spec:
             - { name: REGISTRY_URL, value: "{{ .Values.registry.url }}" }
             - name: REGISTRY_CA
               value: |-
-                {{- .Values.registry.ca | nindent 4 }}
+{{ .Values.registry.ca | indent 16 }}
             {{- /* Derive the public hostname from publicUrlBase (strip scheme + port)
                    and append it to the dev host allowlist so the ingress FQDN
                    (e.g. dev1.frankd.local) passes Rails 8 host authorization. */}}
