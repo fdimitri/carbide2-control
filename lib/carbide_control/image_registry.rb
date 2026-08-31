@@ -56,13 +56,15 @@ module CarbideControl
     def registry_ca_file
       @registry_ca_file ||= begin
         pem = ENV['REGISTRY_CA'].to_s.strip
-        next nil if pem.empty?
-
-        require 'tempfile'
-        f = Tempfile.new(['carbide-registry-ca', '.pem'])
-        f.write(pem)
-        f.flush
-        f.path
+        if pem.empty?
+          nil
+        else
+          require 'tempfile'
+          f = Tempfile.new(['carbide-registry-ca', '.pem'])
+          f.write(pem)
+          f.flush
+          f.path
+        end
       end
     end
   end
