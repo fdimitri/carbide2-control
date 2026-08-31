@@ -31,13 +31,17 @@ Rails.application.routes.draw do
       post   'webauthn/assertion/complete', to: 'webauthn_login#assertion_complete'
 
       # Workspaces — control-plane resource (relocated from /api/workspaces).
-      resources :workspaces, only: [:index, :show, :create, :destroy],
-                controller: 'control/workspaces' do
-        member do
-          patch :update
-          post  :roll
-          post  :token
-          get   :health
+      # Under namespace :control so the URL is /api/v1/control/workspaces
+      # (cardinality signal), resolving to Api::V1::Control::WorkspacesController.
+      namespace :control do
+        resources :workspaces, only: [:index, :show, :create, :destroy],
+                  controller: 'workspaces' do
+          member do
+            patch :update
+            post  :roll
+            post  :token
+            get   :health
+          end
         end
       end
 
