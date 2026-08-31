@@ -70,19 +70,22 @@ class Api::V1::Control::WorkspacesController < ApplicationController
   end
 
   # PATCH /api/v1/control/workspaces/:id — patchable CR spec fields only.
-  # Accepts a template name (resolved to resources) or raw resources, and/or
-  # workspaceImageTag. Storage fields are rejected, not silently ignored.
+  # template_name is DB-authoritative: it updates ControlProject.template_name
+  # AND writes the resolved resources into the CR spec. Storage fields rejected.
   def update
     workspace = find_workspace
     patch    = {}
 
     if params[:template_name].present?
       template = WorkspaceTemplate.find_by!(name: params[:template_name])
+      workspace.update!(template_name: template.name)
       patch[:resources] = template.resources
     end
 
     if params[:resources].present?
       patch[:resources] = params[:resources].to_unsafe_h.slice(:requests, :limits)
+      # Raw resources without a template means the assignment is custom.
+      workspace.update!(template_name: nil) unless params[:template_name].present?
     end
 
     if params[:workspaceImageTag].present?
@@ -96,7 +99,7 @@ class Api::V1::Control::WorkspacesController < ApplicationController
 
     return render json: { error: 'no patchable fields provided' }, status: :unprocessable_entity if patch.empty?
 
-    CarbideControl::WorkspaceApi.merge_patch(workspace, spec: patch)
+    CarbideControl::WorkspaceApi.merge_patch(workspace, spec: patch) unless patch.empty?
     render json: workspace_json(workspace)
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'template not found' }, status: :not_found
@@ -149,6 +152,8 @@ class Api::V1::Control::WorkspacesController < ApplicationController
 
   def workspace_json(workspace)
     cr = CarbideControl::WorkspaceApi.get(workspace) rescue nil
+    spec = cr&.dig(:spec) || {}
+    resources = spec[:resources] || spec["resources"]
     {
       id:           workspace.id,
       uuid:         workspace.uuid,
@@ -157,7 +162,28 @@ class Api::V1::Control::WorkspacesController < ApplicationController
       url:          cr&.dig(:status, :url) || (workspace.status == 'ready' ? workspace_url(workspace) : nil),
       message:      cr&.dig(:status, :message),
       owner_email:  workspace.owner.email,
-      created_at:   workspace.created_at
+      created_at:   workspace.created_at,
+      resources:    resources,
+      template_name: workspace.template_name,
+      template_drift: template_drift?(workspace, resources)
     }
+  end
+
+  # True when the workspace's assigned template exists but the CR's applied
+  # resources no longer match the template's CURRENT definition (the template
+  # was edited after assignment). A nil template_name (custom) is never drift.
+  def template_drift?(workspace, resources)
+    template = workspace.template
+    return false if template.nil? || resources.nil?
+
+    deep_symbolize(resources) != template.resources
+  end
+
+  def deep_symbolize(obj)
+    case obj
+    when Hash then obj.each_with_object({}) { |(k, v), h| h[k.to_sym] = deep_symbolize(v) }
+    when Array then obj.map { |v| deep_symbolize(v) }
+    else obj
+    end
   end
 end
