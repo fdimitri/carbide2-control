@@ -34,10 +34,18 @@ Rails.application.routes.draw do
       resources :workspaces, only: [:index, :show, :create, :destroy],
                 controller: 'control/workspaces' do
         member do
-          post :token
-          get  :health
+          patch :update
+          post  :roll
+          post  :token
+          get   :health
         end
       end
+
+      # Registry image listing (what exists, not what's compatible).
+      get 'control/registry/images', to: 'control/registry#images'
+
+      # Workspace resource templates (ADR-016 presets).
+      get 'control/workspace-templates', to: 'control/workspaces#templates'
     end
 
     post '/login',  to: 'sessions#create'

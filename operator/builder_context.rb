@@ -74,6 +74,26 @@ module Operator
       spec[:workspaceImagePullPolicy] || spec["workspaceImagePullPolicy"] || "IfNotPresent"
     end
 
+    # Workspace-pod resources from spec; falls back to the historical defaults
+    # for CRs that predate the resources field.
+    def resources
+      r = spec[:resources] || spec["resources"] || {}
+      {
+        requests: {
+          cpu:    r.dig(:requests, :cpu)    || r.dig("requests", "cpu")    || "200m",
+          memory: r.dig(:requests, :memory) || r.dig("requests", "memory") || "512Mi"
+        },
+        limits: {
+          cpu:    r.dig(:limits, :cpu)      || r.dig("limits", "cpu")      || "1",
+          memory: r.dig(:limits, :memory)   || r.dig("limits", "memory")   || "1Gi"
+        }
+      }
+    end
+
+    def roll_requested_at
+      spec[:rollRequestedAt] || spec["rollRequestedAt"]
+    end
+
     def postgres
       spec[:postgres] || spec["postgres"] || {}
     end

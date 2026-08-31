@@ -164,6 +164,11 @@ spec:
                         memory: { type: string }
 
                 # ---- lifecycle ----
+                # The operator restarts the Deployment when this value changes.
+                # Control bumps it on POST /roll; it is never set by the operator.
+                rollRequestedAt:
+                  type: string
+                  format: date-time
                 # Future: paused: true tears down the Deployment but keeps the
                 # PVC + Namespace + DB; flipping back creates the Deployment again.
                 paused:

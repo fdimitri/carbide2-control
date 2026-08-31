@@ -43,7 +43,12 @@ module Operator
               }
             },
             template: {
-              metadata: { labels: ctx.common_labels },
+              metadata: {
+                labels: ctx.common_labels,
+                annotations: {
+                  "carbide.dev/rollRequestedAt": ctx.roll_requested_at.to_s
+                }
+              },
               spec: {
                 serviceAccountName: ctx.workspace_name,
                 initContainers:     init_containers(ctx),
@@ -71,10 +76,7 @@ module Operator
                       initialDelaySeconds: 60,
                       periodSeconds:       30
                     },
-                    resources: {
-                      requests: { memory: "512Mi", cpu: "200m" },
-                      limits:   { memory: "1Gi",   cpu: "1" }
-                    }
+                    resources: ctx.resources
                   }
                 ],
                 volumes: [

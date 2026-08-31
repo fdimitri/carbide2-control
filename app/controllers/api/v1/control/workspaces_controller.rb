@@ -11,7 +11,7 @@ class Api::V1::Control::WorkspacesController < ApplicationController
     render json: workspace_json(find_workspace)
   end
 
-  # POST /api/workspaces {name, description?}
+  # POST /api/v1/control/workspaces {name, description?}
   # Creates the row + writes the Workspace CR + creates owner membership.
   # The operator picks up the CR and provisions the pod asynchronously;
   # the row's status field tracks progress, polled by the dashboard.
@@ -51,7 +51,7 @@ class Api::V1::Control::WorkspacesController < ApplicationController
     head :no_content
   end
 
-  # POST /api/workspaces/:id/token
+  # POST /api/v1/control/workspaces/:id/token
   # Returns a short-lived per-workspace JWT for the requested scope. The SPA
   # presents a workspace:rw token to the worker and a workspace:api token to the
   # workspace REST API. Scope selects the TTL (see CarbideControl::JwtIssuer).
@@ -69,7 +69,56 @@ class Api::V1::Control::WorkspacesController < ApplicationController
     }
   end
 
-  # GET /api/workspaces/:id/health
+  # PATCH /api/v1/control/workspaces/:id — patchable CR spec fields only.
+  # Accepts a template name (resolved to resources) or raw resources, and/or
+  # workspaceImageTag. Storage fields are rejected, not silently ignored.
+  def update
+    workspace = find_workspace
+    patch    = {}
+
+    if params[:template_name].present?
+      template = WorkspaceTemplate.find_by!(name: params[:template_name])
+      patch[:resources] = template.resources
+    end
+
+    if params[:resources].present?
+      patch[:resources] = params[:resources].to_unsafe_h.slice(:requests, :limits)
+    end
+
+    if params[:workspaceImageTag].present?
+      patch[:workspaceImageTag] = params[:workspaceImageTag]
+    end
+
+    forbidden = %w[storageSize storageClassName]
+    if (params.keys.map(&:to_s) & forbidden).any?
+      return render json: { error: 'storage fields are not patchable (ADR-016)' }, status: :unprocessable_entity
+    end
+
+    return render json: { error: 'no patchable fields provided' }, status: :unprocessable_entity if patch.empty?
+
+    CarbideControl::WorkspaceApi.merge_patch(workspace, spec: patch)
+    render json: workspace_json(workspace)
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: 'template not found' }, status: :not_found
+  end
+
+  # POST /api/v1/control/workspaces/:id/roll — bump rollRequestedAt so the
+  # operator restarts the Deployment. Patch-only by default; this is the
+  # explicit, disruptive action.
+  def roll
+    workspace = find_workspace
+    CarbideControl::WorkspaceApi.merge_patch(workspace, spec: { rollRequestedAt: Time.now.utc.iso8601 })
+    render json: { ok: true }
+  end
+
+  # GET /api/v1/control/workspace-templates — the seeded resource presets.
+  def templates
+    render json: WorkspaceTemplate.order(:name).map { |t|
+      { name: t.name, resources: t.resources, storage_size: t.storage_size, is_default: t.is_default }
+    }
+  end
+
+  # GET /api/v1/control/workspaces/:id/health
   # Active reachability probe for the workspace pod: is the container up (CR
   # phase), does Rails answer, and does the worker WebSocket upgrade. Kept
   # separate from #index so the list stays fast; the dashboard polls this
