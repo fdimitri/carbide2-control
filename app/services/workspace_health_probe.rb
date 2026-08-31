@@ -66,7 +66,7 @@ class WorkspaceHealthProbe
     Socket.tcp(host, WORKER_PORT, connect_timeout: TIMEOUT) do |sock|
       key = Base64.strict_encode64(SecureRandom.random_bytes(16))
       sock.write(
-        "GET /ws HTTP/1.1\r\n" \
+        "GET /ws?probe=true HTTP/1.1\r\n" \
         "Host: #{host}:#{WORKER_PORT}\r\n" \
         "Upgrade: websocket\r\n" \
         "Connection: Upgrade\r\n" \
