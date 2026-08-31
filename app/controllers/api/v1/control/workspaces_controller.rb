@@ -84,8 +84,12 @@ class Api::V1::Control::WorkspacesController < ApplicationController
 
     if params[:resources].present?
       patch[:resources] = params[:resources].to_unsafe_h.slice(:requests, :limits)
-      # Raw resources without a template means the assignment is custom.
-      workspace.update!(template_name: nil) unless params[:template_name].present?
+      # Raw resources is an explicit override: it ALWAYS clears the template
+      # assignment, even when template_name is also present. Sending both means
+      # "go custom with these values," not "track the template but pretend."
+      # This keeps control's own writes from ever producing the both-sent
+      # ambiguity where template_name disagrees with spec.resources.
+      workspace.update!(template_name: nil)
     end
 
     if params[:workspaceImageTag].present?
