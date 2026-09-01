@@ -94,6 +94,9 @@ class Api::V1::Control::WorkspacesController < ApplicationController
 
     if params[:workspaceImageTag].present?
       patch[:workspaceImageTag] = params[:workspaceImageTag]
+      # Store the intended tag on the control row so spec_drift? has a second
+      # side to compare against (the CR is writable out-of-band).
+      workspace.update!(workspace_image_tag: params[:workspaceImageTag])
     end
 
     forbidden = %w[storageSize storageClassName]
@@ -169,18 +172,38 @@ class Api::V1::Control::WorkspacesController < ApplicationController
       created_at:   workspace.created_at,
       resources:    resources,
       template_name: workspace.template_name,
-      template_drift: template_drift?(workspace, resources)
+      spec_drift:       spec_drift?(workspace, spec),
+      resources_drift:  resources_drift?(workspace, spec),
+      image_tag_drift:  image_tag_drift?(workspace, spec)
     }
   end
 
-  # True when the workspace's assigned template exists but the CR's applied
-  # resources no longer match the template's CURRENT definition (the template
-  # was edited after assignment). A nil template_name (custom) is never drift.
-  def template_drift?(workspace, resources)
-    template = workspace.template
+  # Composite drift: true when ANY intended value disagrees with the live CR.
+  # Coarse "it drifted" signal the UI can show before the per-field breakdown.
+  def spec_drift?(workspace, spec)
+    resources_drift?(workspace, spec) || image_tag_drift?(workspace, spec)
+  end
+
+  # Resources drift: the CR's applied resources differ from the assigned
+  # template's CURRENT definition (template edited since assignment, or an
+  # out-of-band resources write). A nil template (custom) is never drift.
+  def resources_drift?(workspace, spec)
+    template  = workspace.template
+    resources = spec[:resources] || spec["resources"]
     return false if template.nil? || resources.nil?
 
     deep_symbolize(resources) != template.resources
+  end
+
+  # Image-tag drift: the CR's workspaceImageTag differs from the intended tag
+  # stored on the control row (set on the last control PATCH). An out-of-band
+  # tag write shows up here.
+  def image_tag_drift?(workspace, spec)
+    intended = workspace.workspace_image_tag
+    actual   = spec[:workspaceImageTag] || spec["workspaceImageTag"]
+    return false if intended.nil? || actual.nil?
+
+    actual.to_s != intended.to_s
   end
 
   def deep_symbolize(obj)
