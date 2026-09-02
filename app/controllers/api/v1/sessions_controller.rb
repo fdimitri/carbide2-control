@@ -3,7 +3,7 @@
 class Api::V1::SessionsController < ApplicationController
   def renew
     payload   = current_token_payload
-    auth_time = payload&['auth_time']
+    auth_time = payload&.dig('auth_time')
     return render json: { error: 'token has no auth_time' }, status: :unauthorized unless auth_time
 
     ceiling = CarbideControl::UserTokenIssuer.ceiling
