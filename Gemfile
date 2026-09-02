@@ -14,6 +14,7 @@ gem "rack-cors"
 # Auth — same stack as server.
 gem "devise"
 gem "jwt"
+gem "webauthn"
 gem "dotenv-rails", groups: [:development, :test]
 
 # Kubernetes client for the operator. Used both by `bin/operator` (reconcile

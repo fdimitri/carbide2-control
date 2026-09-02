@@ -34,7 +34,7 @@ spec:
           properties:
             spec:
               type: object
-              required: [projectId, ownerEmail, workspaceImage]
+              required: [projectId, projectUuid, ownerEmail, workspaceImage]
               properties:
                 # ---- identity ----
                 projectId:
@@ -44,6 +44,12 @@ spec:
                     Numeric project id, mirrors the control-plane DB primary key.
                     Used to derive default namespace name (ws-<id>),
                     PVC name, ingress path, and JWT audience.
+                projectUuid:
+                  type: string
+                  description: |
+                    Stable control-side project/workspace uuid (ADR-015). Handed
+                    to the pod as WORKSPACE_PROJECT_UUID; == workspace uuid under
+                    1:1. Never a pod-local integer.
                 ownerEmail:
                   type: string
                   format: email
@@ -158,6 +164,11 @@ spec:
                         memory: { type: string }
 
                 # ---- lifecycle ----
+                # The operator restarts the Deployment when this value changes.
+                # Control bumps it on POST /roll; it is never set by the operator.
+                rollRequestedAt:
+                  type: string
+                  format: date-time
                 # Future: paused: true tears down the Deployment but keeps the
                 # PVC + Namespace + DB; flipping back creates the Deployment again.
                 paused:

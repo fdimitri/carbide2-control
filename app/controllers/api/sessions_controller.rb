@@ -1,8 +1,6 @@
 class Api::SessionsController < ApplicationController
   skip_before_action :authenticate_request, only: [:create, :signup]
 
-  USER_TOKEN_TTL = 24 * 60 * 60  # 24h. Dashboard tokens, not workspace tokens.
-
   # POST /api/login {email, password}
   def create
     email, password = credentials_params
@@ -40,16 +38,7 @@ class Api::SessionsController < ApplicationController
   end
 
   def mint_user_token(user)
-    payload = {
-      iss:     'carbide-control',
-      sub:     "user:#{user.id}",
-      aud:     'control:dashboard',
-      iat:     Time.now.to_i,
-      exp:     Time.now.to_i + USER_TOKEN_TTL,
-      user_id: user.id,
-      scope:   'control:user'
-    }
-    JWT.encode(payload, CARBIDE_JWT_SECRET, 'HS256')
+    CarbideControl::UserTokenIssuer.issue!(user)
   end
 
   def user_json(user)

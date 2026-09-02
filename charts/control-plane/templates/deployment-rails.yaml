@@ -24,9 +24,10 @@ spec:
         - name: migrate
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: [bash, -c, "bundle exec rails db:migrate && bundle exec rails db:seed"]
+          command: [bash, -c, "bundle exec rails db:migrate && bundle exec rails db:seed && bundle exec rails carbide:backfill:workspace_uuids"]
           env:
             - { name: RAILS_ENV, value: "{{ .Values.rails.env }}" }
+            - { name: CONTROL_NAMESPACE, value: "{{ .Values.controlNamespace }}" }
             - { name: POSTGRES_HOST,     value: "{{ .Values.postgres.clusterName }}-rw.{{ .Values.postgres.clusterNamespace }}.svc.cluster.local" }
             - { name: POSTGRES_PORT,     value: "5432" }
             - { name: POSTGRES_DB,       value: "{{ .Values.postgres.controlDatabaseName }}" }
@@ -38,7 +39,18 @@ spec:
         - name: rails
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: [bundle, exec, rails, server, -b, "0.0.0.0", -p, "{{ .Values.rails.port }}"]
+          # Install the self-signed registry CA (if provided) into the system
+          # trust store, then exec Rails. This makes Net::HTTP/curl trust the
+          # registry without a per-client ca_file special-case (ADR-025).
+          command:
+            - bash
+            - -c
+            - |
+              if [ -n "$REGISTRY_CA" ]; then
+                echo "$REGISTRY_CA" > /usr/local/share/ca-certificates/carbide-registry.crt
+                update-ca-certificates
+              fi
+              exec bundle exec rails server -b 0.0.0.0 -p {{ .Values.rails.port }}
           ports:
             - { name: http, containerPort: {{ .Values.rails.port }} }
           env:
@@ -56,6 +68,10 @@ spec:
             - { name: WORKSPACE_STORAGE_CLASS, value: "{{ .Values.workspace.storageClassName }}" }
             - { name: WORKSPACE_SHELL_IMAGE, value: "{{ .Values.workspace.shellImage }}" }
             - { name: INGRESS_PUBLIC_PORT, value: "{{ .Values.ingress.publicPort }}" }
+            - { name: REGISTRY_URL, value: "{{ .Values.registry.url }}" }
+            - name: REGISTRY_CA
+              value: |-
+{{ .Values.registry.ca | indent 16 }}
             {{- /* Derive the public hostname from publicUrlBase (strip scheme + port)
                    and append it to the dev host allowlist so the ingress FQDN
                    (e.g. dev1.frankd.local) passes Rails 8 host authorization. */}}
@@ -71,7 +87,7 @@ spec:
               valueFrom: { secretKeyRef: { name: {{ .Values.postgres.credentialsSecret }}, key: username } }
             - name: POSTGRES_PASSWORD
               valueFrom: { secretKeyRef: { name: {{ .Values.postgres.credentialsSecret }}, key: password } }
-            - name: CARBIDE_JWT_SECRET
+            - name: JWT_SIGNING_KEY
               valueFrom: { secretKeyRef: { name: {{ .Values.jwt.secretName }}, key: secret } }
           readinessProbe:
             httpGet: { path: /up, port: http }

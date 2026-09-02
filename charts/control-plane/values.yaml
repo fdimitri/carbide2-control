@@ -28,6 +28,13 @@ image:
 clientTier:
   url: "http://minio.carbide-system.svc.cluster.local:9000/clients"
 
+# --- Image registry (self-hosted, ADR-025) ---
+# Control reads available tags from /v2/ for the patch/roll surface. Empty url
+# disables the listing (the endpoint returns 503).
+registry:
+  url: ""
+  ca: ""
+
 # --- Rails (dashboard / API) ---
 rails:
   enabled: true

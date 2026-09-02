@@ -43,7 +43,12 @@ module Operator
               }
             },
             template: {
-              metadata: { labels: ctx.common_labels },
+              metadata: {
+                labels: ctx.common_labels,
+                annotations: {
+                  "carbide.dev/rollRequestedAt": ctx.roll_requested_at.to_s
+                }
+              },
               spec: {
                 serviceAccountName: ctx.workspace_name,
                 initContainers:     init_containers(ctx),
@@ -71,10 +76,7 @@ module Operator
                       initialDelaySeconds: 60,
                       periodSeconds:       30
                     },
-                    resources: {
-                      requests: { memory: "512Mi", cpu: "200m" },
-                      limits:   { memory: "1Gi",   cpu: "1" }
-                    }
+                    resources: ctx.resources
                   }
                 ],
                 volumes: [
@@ -117,6 +119,7 @@ module Operator
       def env_vars(ctx, pg_ns, pg_cluster, pg_secret)
         [
           { name: "WORKSPACE_PROJECT_ID", value: ctx.project_id.to_s },
+          { name: "WORKSPACE_PROJECT_UUID", value: ctx.project_uuid.to_s },
           { name: "RAILS_ENV",           value: ENV.fetch("WORKSPACE_RAILS_ENV", "development") },
           { name: "PORT",                value: "3000" },
           { name: "WORKER_PORT",         value: "8080" },
@@ -150,10 +153,13 @@ module Operator
             valueFrom: { secretKeyRef: { name: pg_secret, key: "password" } }
           },
 
-          # JWT — mirrored into this namespace by the operator
+          # JWT — control signs RS256 and publishes its public key at the JWKS
+          # endpoint; the pod verifies against that (ADR-015). No shared secret
+          # is mirrored into the pod.
           {
-            name: "WORKER_JWT_SECRET",
-            valueFrom: { secretKeyRef: { name: ctx.jwt_secret_name, key: "secret" } }
+            name: "CONTROL_JWKS_URL",
+            value: ENV.fetch("CONTROL_JWKS_URL",
+                             "http://control-plane.carbide-system.svc.cluster.local:3001/.well-known/jwks.json")
           },
 
           # Host allowlist. Defaults to "*" (accept any Host:) for dev — see

@@ -1,6 +1,9 @@
 Rails.application.routes.draw do
   devise_for :users, defaults: { format: :json }, skip: %i[registrations passwords confirmations unlocks]
 
+  # Public JWKS for workspace pods to verify control-minted tokens (ADR-015).
+  get '/.well-known/jwks.json', to: 'well_known/jwks#show'
+
   namespace :api, defaults: { format: :json } do
     # Build/version provenance (public). `common` is the shape both the control
     # plane and the workspace server implement identically; `control` adds
@@ -9,6 +12,44 @@ Rails.application.routes.draw do
     namespace :v1 do
       get 'common/version',  to: 'version#common'
       get 'control/version', to: 'version#control'
+      # Authenticated identity for THIS app's users table (control-local id).
+      get 'control/me',      to: 'me#show'
+      # Renew the login token (sliding, with the session ceiling).
+      post 'control/renew',  to: 'sessions#renew'
+      # Control-side user + settings inspection/editing (no authz yet).
+      resources :users,    only: [:show]
+      resources :settings, only: [:index, :update]
+
+      # In-session passkey management (ADR-021).
+      post   'webauthn/registration/begin',    to: 'webauthn#registration_begin'
+      post   'webauthn/registration/complete', to: 'webauthn#registration_complete'
+      get    'webauthn/credentials',           to: 'webauthn#index'
+      delete 'webauthn/credentials/:id',       to: 'webauthn#destroy'
+
+      # Passkey login (unauthenticated assertion ceremony).
+      post   'webauthn/assertion/begin',    to: 'webauthn_login#assertion_begin'
+      post   'webauthn/assertion/complete', to: 'webauthn_login#assertion_complete'
+
+      # Workspaces — control-plane resource (relocated from /api/workspaces).
+      # Under namespace :control so the URL is /api/v1/control/workspaces
+      # (cardinality signal), resolving to Api::V1::Control::WorkspacesController.
+      namespace :control do
+        resources :workspaces, only: [:index, :show, :create, :destroy],
+                  controller: 'workspaces' do
+          member do
+            patch :update
+            post  :roll
+            post  :token
+            get   :health
+          end
+        end
+      end
+
+      # Registry image listing (what exists, not what's compatible).
+      get 'control/registry/images', to: 'control/registry#images'
+
+      # Workspace resource templates (ADR-016 presets).
+      get 'control/workspace-templates', to: 'control/workspaces#templates'
     end
 
     post '/login',  to: 'sessions#create'
@@ -17,13 +58,6 @@ Rails.application.routes.draw do
 
     # Available SPA client builds for the dashboard picker (public).
     resources :clients, only: [:index]
-
-    resources :workspaces, only: [:index, :show, :create, :destroy] do
-      member do
-        post :token   # mint per-workspace JWT for workspace pod bootstrap
-        get  :health  # active reachability probe (rails + worker WS)
-      end
-    end
   end
 
   get 'up' => 'rails/health#show', as: :rails_health_check

@@ -30,7 +30,6 @@ spec:
             - { name: LOG_LEVEL,           value: "{{ .Values.operator.logLevel }}" }
             - { name: CONTROL_NAMESPACE,   value: "{{ .Values.controlNamespace }}" }
             - { name: PUBLIC_URL_BASE,     value: "{{ .Values.publicUrlBase }}" }
-            - { name: JWT_SOURCE_SECRET,   value: "{{ .Values.jwt.secretName }}" }
             - { name: WORKSPACE_SHELL_IMAGE, value: "{{ .Values.workspace.shellImage }}" }
           resources:
             {{- toYaml .Values.operator.resources | nindent 12 }}

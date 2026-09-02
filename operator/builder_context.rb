@@ -27,6 +27,10 @@ module Operator
       Integer(spec[:projectId] || spec["projectId"])
     end
 
+    def project_uuid
+      spec[:projectUuid] || spec["projectUuid"]
+    end
+
     # Derived names. Must match ControlProject#namespace_name etc on the
     # Rails side — these are the source of truth for the operator.
     def workspace_namespace
@@ -49,10 +53,6 @@ module Operator
       "carbide_workspace_#{project_id}"
     end
 
-    def jwt_secret_name
-      "workspace-jwt"
-    end
-
     def ingress
       spec[:ingress] || spec["ingress"] || {}
     end
@@ -72,6 +72,26 @@ module Operator
 
     def image_pull_policy
       spec[:workspaceImagePullPolicy] || spec["workspaceImagePullPolicy"] || "IfNotPresent"
+    end
+
+    # Workspace-pod resources from spec; falls back to the historical defaults
+    # for CRs that predate the resources field.
+    def resources
+      r = spec[:resources] || spec["resources"] || {}
+      {
+        requests: {
+          cpu:    r.dig(:requests, :cpu)    || r.dig("requests", "cpu")    || "200m",
+          memory: r.dig(:requests, :memory) || r.dig("requests", "memory") || "512Mi"
+        },
+        limits: {
+          cpu:    r.dig(:limits, :cpu)      || r.dig("limits", "cpu")      || "1",
+          memory: r.dig(:limits, :memory)   || r.dig("limits", "memory")   || "1Gi"
+        }
+      }
+    end
+
+    def roll_requested_at
+      spec[:rollRequestedAt] || spec["rollRequestedAt"]
     end
 
     def postgres

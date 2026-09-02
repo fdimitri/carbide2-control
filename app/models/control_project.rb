@@ -20,6 +20,17 @@ class ControlProject < ApplicationRecord
 
   after_initialize { self.status ||= 'pending' }
 
+  # Stable control-side identity (the workspace uuid; == project uuid under
+  # 1:1), carried in the token's aud/project_uuid claims.
+  before_validation :assign_uuid, on: :create
+  before_validation :assign_default_template, on: :create
+
+  # The assigned resource preset (DB-authoritative). Resolves to the current
+  # WorkspaceTemplate row; nil means "no preset assigned" (custom).
+  def template
+    template_name.present? ? WorkspaceTemplate.find_by(name: template_name) : nil
+  end
+
   # Derived names. Kept here (not in the operator) so Rails can render URLs
   # without consulting the cluster. The operator MUST honor the same scheme.
   def namespace_name
@@ -32,5 +43,15 @@ class ControlProject < ApplicationRecord
 
   def ingress_path_prefix
     "/w/#{id}"
+  end
+
+  private
+
+  def assign_uuid
+    self.uuid ||= SecureRandom.uuid
+  end
+
+  def assign_default_template
+    self.template_name ||= WorkspaceTemplate.find_by(is_default: true)&.name
   end
 end
