@@ -74,6 +74,14 @@ class Api::V1::Control::WorkspacesController < ApplicationController
   # AND writes the resolved resources into the CR spec. Storage fields rejected.
   def update
     workspace = find_workspace
+
+    # Reject non-patchable fields BEFORE mutating anything, so a 422 can't
+    # leave the DB changed while the CR stays untouched (#4).
+    forbidden = %w[storageSize storageClassName]
+    if (params.keys.map(&:to_s) & forbidden).any?
+      return render json: { error: 'storage fields are not patchable (ADR-016)' }, status: :unprocessable_entity
+    end
+
     patch    = {}
 
     if params[:template_name].present?
@@ -97,11 +105,6 @@ class Api::V1::Control::WorkspacesController < ApplicationController
       # Store the intended tag on the control row so spec_drift? has a second
       # side to compare against (the CR is writable out-of-band).
       workspace.update!(workspace_image_tag: params[:workspaceImageTag])
-    end
-
-    forbidden = %w[storageSize storageClassName]
-    if (params.keys.map(&:to_s) & forbidden).any?
-      return render json: { error: 'storage fields are not patchable (ADR-016)' }, status: :unprocessable_entity
     end
 
     return render json: { error: 'no patchable fields provided' }, status: :unprocessable_entity if patch.empty?
