@@ -22,7 +22,7 @@ module CarbideControl
     end
 
     def available?
-      !base_url.nil?
+      base_url.present?
     end
 
     def list_images
