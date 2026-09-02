@@ -76,7 +76,11 @@ module CarbideControl
             # cert (self-signed until a real cert is configured).
             entryPoints: ENV.fetch('INGRESS_ENTRYPOINTS', 'web,websecure').split(',').map(&:strip).reject(&:empty?),
             tls: {}
-          }
+          },
+          # A new workspace's default template must reach the CR spec, or the
+          # operator falls back to its own defaults and the DB's template_name
+          # lies about what was applied.
+          resources: project.template&.resources,
         }
       }
     end
