@@ -1,0 +1,62 @@
+{{- if .Values.rails.enabled }}
+{{- /*
+  Schema setup runs once per release, not once per Rails replica.
+
+  As a per-pod initContainer this raced itself at replicas > 1: every replica
+  ran `db:seed` concurrently, the losers hit RecordNotUnique on the unique
+  indexes behind users.email / workspace_templates.name, and a non-zero
+  initContainer put the pod into CrashLoopBackOff. `db:migrate` was always safe
+  (Rails takes an advisory lock) and the uuid backfill was merely N-times
+  redundant, but seeding made replicas > 1 unusable on a fresh install.
+
+  post-install, not pre-install: the CNPG Database CR that provisions
+  POSTGRES_DB is an ordinary chart resource (database.yaml), so it does not
+  exist yet when pre-install hooks run. On upgrade the ordering is the one that
+  matters anyway -- pre-upgrade puts the schema in place before the new pods
+  roll. On a fresh install Rails is briefly up without a schema; it boots fine
+  (no initializer touches the DB) and serves errors until this Job completes.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "control-plane.fullname" . }}-migrate
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    "helm.sh/hook": post-install,pre-upgrade
+    "helm.sh/hook-weight": "0"
+    # Failed Jobs are kept so their logs survive; successful ones are cleaned up.
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  # Pod-level retries cover a database that is reachable but not yet accepting
+  # connections on a fresh install. Exhausting them fails the Helm release.
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        {{- include "control-plane.labels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      # The uuid backfill merge-patches Workspace CRs, so this needs the Rails
+      # ServiceAccount rather than the namespace default.
+      serviceAccountName: {{ include "control-plane.fullname" . }}-rails
+      containers:
+        - name: migrate
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [bash, -c, "bundle exec rails db:migrate && bundle exec rails db:seed && bundle exec rails carbide:backfill:workspace_uuids"]
+          env:
+            - { name: RAILS_ENV, value: "{{ .Values.rails.env }}" }
+            - { name: CONTROL_NAMESPACE, value: "{{ .Values.controlNamespace }}" }
+            - { name: POSTGRES_HOST,     value: "{{ .Values.postgres.clusterName }}-rw.{{ .Values.postgres.clusterNamespace }}.svc.cluster.local" }
+            - { name: POSTGRES_PORT,     value: "5432" }
+            - { name: POSTGRES_DB,       value: "{{ .Values.postgres.controlDatabaseName }}" }
+            - name: POSTGRES_USER
+              valueFrom: { secretKeyRef: { name: {{ .Values.postgres.credentialsSecret }}, key: username } }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ .Values.postgres.credentialsSecret }}, key: password } }
+{{- end }}
