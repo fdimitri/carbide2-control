@@ -41,7 +41,6 @@ Rails.application.routes.draw do
             post  :roll
             post  :token
             get   :health
-            patch :shell_mode
           end
 
           # ADR-029 §4. GET is the client's display-only status; POST is the

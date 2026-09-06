@@ -167,6 +167,7 @@ module Operator
       apply!(KubeClient.core,    :service_account, ObjectBuilders::Rbac.exec_service_account(ctx))
       apply!(KubeClient.rbac,    :role_binding,    ObjectBuilders::Rbac.exec_role_binding(ctx))
       apply!(KubeClient.rbac,    :role_binding,    ObjectBuilders::Rbac.token_mint_role_binding(ctx))
+      apply!(KubeClient.rbac,    :role_binding,    ObjectBuilders::Rbac.status_role_binding(ctx))
       apply!(KubeClient.core,    :persistent_volume_claim, pvc)
       apply!(KubeClient.core,    :service,                svc)
       apply!(KubeClient.traefik, :middleware,             mw)

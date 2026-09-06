@@ -120,7 +120,7 @@ module Operator
           url = git[:cloneUrl] || git["cloneUrl"]
           ref = git[:ref]      || git["ref"] || "main"
           if url && !url.empty?
-            target = "/srv/projects/#{ctx.project_id}"
+            target = "/srv/projects/#{ctx.project_uuid}"
             containers << {
               name:  "git-clone",
               image: "alpine/git:latest",
@@ -190,8 +190,7 @@ module Operator
           # list to tighten per cluster.
           { name: "RAILS_DEV_HOSTS", value: workspace_dev_hosts },
 
-          # Worker shell backend
-          { name: "CARBIDE_BACKEND",            value: "kube" },
+          # Worker shell
           { name: "CARBIDE_SHELL_PULL_POLICY",  value: "IfNotPresent" },
           {
             name: "CARBIDE_NAMESPACE",
@@ -201,8 +200,7 @@ module Operator
 
           # ADR-029: the worker asks control for a shell handle rather than
           # creating the pod itself, so it needs the control endpoint and the
-          # workspace it is allowed to ask about. CARBIDE_SHELL_IMAGE is gone --
-          # the image is the operator's business now, not the worker's.
+          # workspace it is allowed to ask about.
           { name: "WORKSPACE_ID", value: ctx.project_id.to_s },
           {
             name: "CONTROL_URL",

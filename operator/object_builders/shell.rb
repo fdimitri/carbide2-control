@@ -11,6 +11,10 @@
 # volumeClaimTemplates is deliberately unused — the shell mounts the workspace's
 # existing PVC, so the usual StatefulSet trap of orphaned per-replica PVCs does
 # not apply here.
+#
+# The subPath is the project UUID. That is the control-owned workspace identity,
+# stamped into the CR and handed to the workspace pod, and it is what the
+# workspace names its own project directory by (Project#default_root_path).
 
 module Operator
   module ObjectBuilders
@@ -74,7 +78,7 @@ module Operator
       end
 
       def pod_spec(ctx)
-        mounts = [{ name: "files", mountPath: MOUNT_PATH, subPath: ctx.project_id.to_s }]
+        mounts = [{ name: "files", mountPath: MOUNT_PATH, subPath: ctx.project_uuid.to_s }]
 
         {
           terminationGracePeriodSeconds: 5,

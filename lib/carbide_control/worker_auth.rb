@@ -76,6 +76,11 @@ module CarbideControl
         m = username.match(%r{\Asystem:serviceaccount:([^:]+):(.+)\z})
         return nil unless m
 
+        # §6: audience AND SA identity. The workspace pod's SA is named after
+        # its namespace (ws-N/ws-N); the exec SA (ws-N/ws-N-exec) lives in the
+        # same namespace and must not be able to report as the worker.
+        return nil unless m[1] == m[2]
+
         Identity.new(namespace: m[1], service_account: m[2], username: username)
       rescue StandardError => e
         Rails.logger.warn("[WorkerAuth] TokenReview failed: #{e.class}: #{e.message}")

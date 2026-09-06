@@ -52,6 +52,10 @@ class ControlProject < ApplicationRecord
 
   # --- shell (ADR-029) ---------------------------------------------------
 
+  # Placeholder name, known wrong: a workspace can hold several projects, so
+  # this asserts a 1:1 that does not hold, and the identifier should be the
+  # project UUID rather than the numeric id. Survives only because project UUID
+  # currently equals workspace UUID. Pending the ADR-030 identity decision.
   def shell_name
     "ws-#{id}-shell"
   end

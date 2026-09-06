@@ -24,5 +24,10 @@ class AddShellToControlProjects < ActiveRecord::Migration[8.1]
     # The sweep's driving query: lazy workspaces whose intent is currently 1.
     add_index :control_projects, %i[shell_mode shell_replicas],
               name: 'index_control_projects_on_shell_sweep'
+
+    # The 'eager' default above exists only to backfill rows that predate the
+    # column. Left in place it would pre-empt ControlProject's `||=` and the
+    # global Setting would never be consulted for a new workspace (§2).
+    change_column_default :control_projects, :shell_mode, from: 'eager', to: nil
   end
 end

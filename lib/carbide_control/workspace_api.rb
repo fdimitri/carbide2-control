@@ -1,6 +1,9 @@
-# Writes / reads / deletes Workspace Custom Resources. The ONLY way Rails
-# touches Kubernetes. RBAC for the Rails ServiceAccount allows exactly:
-#   create/get/list/watch/delete workspaces.carbide.dev in carbide-system.
+# Writes / reads / deletes Workspace Custom Resources. Rails' primary way of
+# touching Kubernetes: RBAC for the Rails ServiceAccount allows
+#   create/get/list/watch/delete workspaces.carbide.dev in carbide-system,
+# plus the three ADR-029 exceptions that live in Kube / ExecGrant / WorkerAuth
+# / ShellStatus (one named pod GET, a TokenReview, a serviceaccounts/token
+# mint). Nothing else reaches the cluster from Rails.
 #
 # The operator is responsible for everything that happens AFTER the CR is
 # written. Rails reads `.status` for display but never writes it.

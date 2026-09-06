@@ -31,12 +31,16 @@ module CarbideControl
       namespace = project.namespace_name
       account   = service_account_name(project)
 
+      # No `audiences`: the token is presented to the API server itself, so it
+      # must carry an audience in `--api-audiences`. Omitting the field makes
+      # the API server default it to exactly that, rather than us hardcoding a
+      # guess at the cluster's SA issuer.
       result = Kube.post_subresource(
         "/api/v1/namespaces/#{namespace}/serviceaccounts/#{account}/token",
         {
           apiVersion: 'authentication.k8s.io/v1',
           kind:       'TokenRequest',
-          spec:       { audiences: ['https://kubernetes.default.svc'], expirationSeconds: TTL_SECONDS }
+          spec:       { expirationSeconds: TTL_SECONDS }
         }
       )
 

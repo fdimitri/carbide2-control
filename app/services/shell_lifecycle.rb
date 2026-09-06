@@ -49,9 +49,18 @@ class ShellLifecycle
 
         case mode
         when 'lazy'
-          # Eligible for idle-down immediately: the clock starts at the flip.
-          p.shell_idle_since ||= Time.current if p.shell_terminals.zero?
-          p.shell_replicas = 1 if p.shell_terminals.positive?
+          if p.shell_terminals.positive?
+            p.shell_replicas = 1
+          else
+            # Eligible for idle-down immediately: the clock starts at the flip.
+            # Assigned, not ||=: a latch left over from an earlier lazy period
+            # is unreadable under eager and must be corrected here, or the
+            # sweep sees hours of "idle" that never happened.
+            p.shell_idle_since = Time.current
+            # disabled -> lazy creates the object at lazy's default of 0;
+            # eager -> lazy leaves a running shell up until the timeout.
+            p.shell_replicas = 0 if previous == 'disabled'
+          end
         when 'eager'
           # Belt-and-braces; the operator holds 1 under eager regardless.
           p.shell_replicas = 1

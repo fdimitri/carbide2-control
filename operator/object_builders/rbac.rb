@@ -129,6 +129,32 @@ module Operator
           }
         }
       end
+
+      # Lets the Rails SA GET the shell pod in THIS namespace, which is how
+      # ADR-029 §4 derives phase/ready. Same shape as the mint binding: a
+      # fixed ClusterRole, bound per workspace, so Rails can read one named pod
+      # here and list nothing anywhere.
+      def status_role_binding(ctx)
+        {
+          apiVersion: "rbac.authorization.k8s.io/v1",
+          kind:       "RoleBinding",
+          metadata: {
+            name:      "#{ctx.workspace_name}-status",
+            namespace: ctx.workspace_namespace,
+            labels:    ctx.common_labels
+          },
+          subjects: [{
+            kind:      "ServiceAccount",
+            name:      ctx.rails_service_account_name,
+            namespace: ctx.control_namespace
+          }],
+          roleRef: {
+            apiGroup: "rbac.authorization.k8s.io",
+            kind:     "ClusterRole",
+            name:     "carbide-workspace-status"
+          }
+        }
+      end
     end
   end
 end

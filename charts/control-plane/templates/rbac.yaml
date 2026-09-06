@@ -1,7 +1,9 @@
 # Operator ServiceAccount + cluster-scoped RBAC.
 # This is intentionally broad — the operator is the ONLY thing in the cluster
 # with this much authority. The Rails ServiceAccount (separate, below) gets
-# only "create/get/list/watch/delete workspaces.carbide.dev".
+# workspaces.carbide.dev in its own namespace, plus the three ADR-029 reads/
+# subresource writes: TokenReview (here), and `get pods` + `serviceaccounts/
+# token` per workspace namespace via RoleBindings the operator creates.
 
 apiVersion: v1
 kind: ServiceAccount
@@ -119,6 +121,35 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: {{ include "control-plane.fullname" . }}-rails
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "control-plane.fullname" . }}-rails
+    namespace: {{ .Release.Namespace }}
+---
+# ADR-029 §6: the worker authenticates to Rails with a projected SA token and
+# Rails verifies it with a TokenReview. TokenReview is cluster-scoped, so this
+# cannot live in the namespaced Role above.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "control-plane.fullname" . }}-rails-tokenreview
+  labels:
+    {{- include "control-plane.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["authentication.k8s.io"]
+    resources: [tokenreviews]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "control-plane.fullname" . }}-rails-tokenreview
+  labels:
+    {{- include "control-plane.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "control-plane.fullname" . }}-rails-tokenreview
 subjects:
   - kind: ServiceAccount
     name: {{ include "control-plane.fullname" . }}-rails

@@ -82,12 +82,21 @@ class Api::V1::Control::WorkspacesController < ApplicationController
       return render json: { error: 'storage fields are not patchable (ADR-016)' }, status: :unprocessable_entity
     end
 
+    if params[:shellMode].present? && ControlProject::SHELL_MODES.exclude?(params[:shellMode].to_s)
+      return render json: { error: "shellMode must be one of: #{ControlProject::SHELL_MODES.join(', ')}" },
+                    status: :unprocessable_entity
+    end
+
     patch    = {}
 
     if params[:template_name].present?
       template = WorkspaceTemplate.find_by!(name: params[:template_name])
       workspace.update!(template_name: template.name)
       patch[:resources] = template.resources
+      # Shell sizing is template-driven too (ADR-016 §3), so retemplating has to
+      # resize both pods or the shell keeps the old template's limits until
+      # something else triggers a full apply.
+      patch[:shell] = { resources: template.shell_resources }
     end
 
     if params[:resources].present?
@@ -107,6 +116,16 @@ class Api::V1::Control::WorkspacesController < ApplicationController
       workspace.update!(workspace_image_tag: params[:workspaceImageTag])
     end
 
+    if params[:shellMode].present?
+      # Not a plain column write: eager -> lazy has to arm the idle latch
+      # (ADR-029 §2), so it goes through ShellLifecycle like every other
+      # replicas decision.
+      ShellLifecycle.set_mode!(workspace, params[:shellMode].to_s)
+      patch[:shell] = (patch[:shell] || {}).merge(
+        mode: workspace.shell_mode, replicas: workspace.shell_replicas.to_i
+      )
+    end
+
     return render json: { error: 'no patchable fields provided' }, status: :unprocessable_entity if patch.empty?
 
     CarbideControl::WorkspaceApi.merge_patch(workspace, spec: patch) unless patch.empty?
@@ -122,26 +141,6 @@ class Api::V1::Control::WorkspacesController < ApplicationController
     workspace = find_workspace
     CarbideControl::WorkspaceApi.merge_patch(workspace, spec: { rollRequestedAt: Time.now.utc.iso8601 })
     render json: { ok: true }
-  end
-
-  # PATCH /api/v1/control/workspaces/:id/shell_mode {mode}
-  # Separate from #update because a mode flip is not a plain column write:
-  # eager -> lazy has to arm the idle latch (ADR-029 §2), so it goes through
-  # ShellLifecycle rather than assigning the attribute here.
-  def shell_mode
-    workspace = find_workspace
-    mode = params[:mode].to_s
-
-    unless ControlProject::SHELL_MODES.include?(mode)
-      return render json: { error: "mode must be one of: #{ControlProject::SHELL_MODES.join(', ')}" },
-                    status: :unprocessable_entity
-    end
-
-    ShellLifecycle.set_mode!(workspace, mode)
-    CarbideControl::WorkspaceApi.merge_patch(
-      workspace, spec: { shell: { mode: workspace.shell_mode, replicas: workspace.shell_replicas.to_i } }
-    )
-    render json: { mode: workspace.shell_mode, replicas: workspace.shell_replicas }
   end
 
   # GET /api/v1/control/workspace-templates — the seeded resource presets.
