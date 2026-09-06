@@ -5,15 +5,26 @@
 #   GET /v2/<repo>/tags/list -> { tags: [...] }
 #
 # The registry is self-signed (mkcert), so control trusts REGISTRY_CA. The
-# three carbide repos are:
-#   carbide2          (workspace: server-worker SHA pair, "<server>-<worker>")
-#   carbide2-control  (control image)
-#   carbide2-shell    (shell image)
+# carbide repos are:
+#   carbide2           (workspace: server-worker SHA pair, "<server>-<worker>")
+#   carbide2-control   (control image)
+#   carbide2-shell*    (shell images)
+#
+# Shell variants are separate repositories rather than tag prefixes (ADR-029
+# §2): /v2/carbide2-shell-rust/tags/list answers "what versions of this variant
+# exist" in one call, with no tag-string sorting and no retention policy shared
+# between unrelated toolchains. Hence a prefix match here instead of a fixed
+# allowlist — a new variant needs no code change to become visible.
 module CarbideControl
   module ImageRegistry
-    REPOS = %w[carbide2 carbide2-control carbide2-shell].freeze
+    REPOS         = %w[carbide2 carbide2-control].freeze
+    REPO_PREFIXES = %w[carbide2-shell].freeze
 
     module_function
+
+    def known_repo?(repo)
+      REPOS.include?(repo) || REPO_PREFIXES.any? { |p| repo == p || repo.start_with?("#{p}-") }
+    end
 
     def base_url
       ENV.fetch('REGISTRY_URL').sub(%r{/\z}, '')
@@ -29,7 +40,7 @@ module CarbideControl
       raise 'REGISTRY_URL is not configured' unless available?
 
       catalog = get('/v2/_catalog')
-      repos   = (catalog['repositories'] || []).select { |r| REPOS.include?(r) }
+      repos   = (catalog['repositories'] || []).select { |r| known_repo?(r) }
       repos.map { |repo| { repository: repo, tags: tags_for(repo) } }
     end
 

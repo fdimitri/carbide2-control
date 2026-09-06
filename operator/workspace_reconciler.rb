@@ -22,6 +22,7 @@ require "object_builders/database"
 require "object_builders/service"
 require "object_builders/ingressroute"
 require "object_builders/deployment"
+require "object_builders/shell"
 
 module Operator
   class WorkspaceReconciler
@@ -172,7 +173,32 @@ module Operator
       apply!(KubeClient.traefik, :middleware,    redir_mw) if redir_mw
       apply!(KubeClient.traefik, :ingress_route, redir_ir) if redir_ir
       apply!(KubeClient.apps,    :deployment,             dep)
+      apply_shell(ctx)
       replicate_pg_credentials(ctx)
+    end
+
+    # ADR-029 §3. `disabled` is an object delete rather than replicas 0, so a
+    # disabled workspace carries no shell object at all.
+    def apply_shell(ctx)
+      unless ctx.shell_enabled?
+        delete_shell(ctx)
+        return
+      end
+
+      apply!(KubeClient.core, :service,      ObjectBuilders::Shell.service(ctx))
+      apply!(KubeClient.apps, :stateful_set, ObjectBuilders::Shell.build(ctx))
+    end
+
+    def delete_shell(ctx)
+      KubeClient.apps.delete_stateful_set(ctx.shell_name, ctx.workspace_namespace)
+    rescue Kubeclient::ResourceNotFoundError
+      nil
+    ensure
+      begin
+        KubeClient.core.delete_service(ctx.shell_name, ctx.workspace_namespace)
+      rescue Kubeclient::ResourceNotFoundError
+        nil
+      end
     end
 
     # The workspace Deployment mounts `postgres.credentialsSecret` as env. The

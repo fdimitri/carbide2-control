@@ -106,6 +106,69 @@ module Operator
       spec[:paused] || spec["paused"] || false
     end
 
+    # --- shell (ADR-029) ---------------------------------------------------
+
+    def shell
+      spec[:shell] || spec["shell"] || {}
+    end
+
+    def shell_mode
+      shell[:mode] || shell["mode"] || "eager"
+    end
+
+    def shell_enabled?
+      shell_mode != "disabled"
+    end
+
+    # §2 precedence: spec.shell.replicas is consulted ONLY under lazy. Under
+    # eager the operator holds 1 whatever the field says, so a refcount-driven
+    # 0 can never scale an eager shell down. A paused workspace takes
+    # everything to 0 (ADR-016 §4).
+    def shell_replicas
+      return 0 if paused? || !shell_enabled?
+      return 1 unless shell_mode == "lazy"
+
+      value = shell[:replicas] || shell["replicas"]
+      value.nil? ? 0 : Integer(value).clamp(0, 1)
+    end
+
+    def shell_name
+      "ws-#{project_id}-shell"
+    end
+
+    def shell_image
+      repo = shell[:imageRepo] || shell["imageRepo"] || "carbide2-shell"
+      tag  = shell[:imageTag]  || shell["imageTag"]  || "dev"
+      "#{repo}:#{tag}"
+    end
+
+    def shell_image_pull_policy
+      shell[:imagePullPolicy] || shell["imagePullPolicy"] || "IfNotPresent"
+    end
+
+    # Falls back to what project_pod.rb hardcoded, so a CR written before the
+    # template gained shell columns still gets the shape it had.
+    def shell_resources
+      r = shell[:resources] || shell["resources"] || {}
+      {
+        requests: {
+          cpu:    r.dig(:requests, :cpu)    || r.dig("requests", "cpu")    || "50m",
+          memory: r.dig(:requests, :memory) || r.dig("requests", "memory") || "128Mi"
+        },
+        limits: {
+          cpu:    r.dig(:limits, :cpu)      || r.dig("limits", "cpu")      || "6",
+          memory: r.dig(:limits, :memory)   || r.dig("limits", "memory")   || "8Gi"
+        }
+      }
+    end
+
+    def shell_labels
+      common_labels.merge(
+        LABEL_NAME     => "carbide2-shell",
+        LABEL_INSTANCE => shell_name
+      )
+    end
+
     def common_labels
       {
         LABEL_MANAGED_BY => "carbide2-control",

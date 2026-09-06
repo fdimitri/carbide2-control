@@ -28,3 +28,23 @@ TEMPLATES.each do |t|
   end
 end
 puts "[seed] workspace templates: #{WorkspaceTemplate.pluck(:name).join(', ')}"
+
+# ADR-029 §2 / OQ2. Global defaults; each is overridable per workspace by a
+# nullable control_projects column. find_or_create_by! so an operator's edits
+# survive re-seeding.
+#
+# The two clocks are deliberately not ordered the way an earlier draft assumed.
+# max_report_time means "the worker is gone" and reclaiming an orphan is urgent
+# — at a 30s heartbeat, 5m is ten consecutive misses. idle_timeout means "the
+# worker is here and nobody wants a shell", which is a comfort call: 4h holds
+# the shell through a working day's gaps and still reclaims it overnight.
+SHELL_SETTINGS = {
+  'workspace_shell_mode'            => 'eager',
+  'workspace_shell_idle_timeout'    => 4 * 3600,
+  'workspace_shell_max_report_time' => 300
+}.freeze
+
+SHELL_SETTINGS.each do |key, value|
+  Setting.find_or_create_by!(key: key) { |row| row.value = value.to_s }
+end
+puts "[seed] shell settings: #{SHELL_SETTINGS.keys.join(', ')}"

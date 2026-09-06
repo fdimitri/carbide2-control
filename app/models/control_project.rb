@@ -18,12 +18,17 @@ class ControlProject < ApplicationRecord
   STATUSES = %w[pending provisioning ready failed terminating].freeze
   validates :status, inclusion: { in: STATUSES }
 
+  # ADR-029 §2. eager: always up. lazy: 0↔1 on demand. disabled: no object.
+  SHELL_MODES = %w[eager lazy disabled].freeze
+  validates :shell_mode, inclusion: { in: SHELL_MODES }
+
   after_initialize { self.status ||= 'pending' }
 
   # Stable control-side identity (the workspace uuid; == project uuid under
   # 1:1), carried in the token's aud/project_uuid claims.
   before_validation :assign_uuid, on: :create
   before_validation :assign_default_template, on: :create
+  before_validation :assign_default_shell_mode, on: :create
 
   # The assigned resource preset (DB-authoritative). Resolves to the current
   # WorkspaceTemplate row; nil means "no preset assigned" (custom).
@@ -45,6 +50,51 @@ class ControlProject < ApplicationRecord
     "/w/#{id}"
   end
 
+  # --- shell (ADR-029) ---------------------------------------------------
+
+  def shell_name
+    "ws-#{id}-shell"
+  end
+
+  # The StatefulSet's ordinal-0 pod. Derivable rather than discoverable, which
+  # is the whole reason §3 picked a StatefulSet: nothing has to publish this
+  # name anywhere for it to stay correct.
+  def shell_pod_name
+    "#{shell_name}-0"
+  end
+
+  def shell_disabled?
+    shell_mode == 'disabled'
+  end
+
+  def shell_lazy?
+    shell_mode == 'lazy'
+  end
+
+  def effective_shell_idle_timeout
+    shell_idle_timeout || Setting.get('workspace_shell_idle_timeout',
+                                      default: 4 * 3600,
+                                      env: 'WORKSPACE_SHELL_IDLE_TIMEOUT')
+  end
+
+  def effective_shell_max_report_time
+    shell_max_report_time || Setting.get('workspace_shell_max_report_time',
+                                         default: 300,
+                                         env: 'WORKSPACE_SHELL_MAX_REPORT_TIME')
+  end
+
+  def effective_shell_image_repo
+    shell_image_repo.presence || Setting.get('workspace_shell_image_repo',
+                                             default: 'carbide2-shell',
+                                             env: 'WORKSPACE_SHELL_IMAGE_REPO')
+  end
+
+  def effective_shell_image_tag
+    shell_image_tag.presence || Setting.get('workspace_shell_image_tag',
+                                            default: 'dev',
+                                            env: 'WORKSPACE_SHELL_IMAGE_TAG')
+  end
+
   private
 
   def assign_uuid
@@ -53,5 +103,14 @@ class ControlProject < ApplicationRecord
 
   def assign_default_template
     self.template_name ||= WorkspaceTemplate.find_by(is_default: true)&.name
+  end
+
+  # The resolved mode is recorded per-workspace and then stamped into the CR,
+  # so the operator never has to know the global default existed (ADR-025).
+  def assign_default_shell_mode
+    self.shell_mode ||= Setting.get('workspace_shell_mode',
+                                    default: 'eager',
+                                    env: 'WORKSPACE_SHELL_MODE').to_s
+    self.shell_replicas = shell_mode == 'eager' ? 1 : 0
   end
 end

@@ -79,6 +79,8 @@ module CarbideControl
       template_resources = project.template&.resources
       spec[:resources] = template_resources if template_resources.present?
 
+      spec[:shell] = shell_spec_for(project)
+
       {
         apiVersion: "#{GROUP}/#{VERSION}",
         kind:       'Workspace',
@@ -89,6 +91,21 @@ module CarbideControl
         },
         spec: spec,
       }
+    end
+
+    # ADR-029 §2. `replicas` is the applied projection of the durable intent
+    # column, not a user field; the operator ignores it unless mode is lazy.
+    def self.shell_spec_for(project)
+      shell = {
+        mode:            project.shell_mode,
+        replicas:        project.shell_replicas.to_i,
+        imageRepo:       project.effective_shell_image_repo,
+        imageTag:        project.effective_shell_image_tag,
+        imagePullPolicy: ENV.fetch('WORKSPACE_SHELL_PULL_POLICY', 'IfNotPresent')
+      }
+      resources = project.template&.shell_resources
+      shell[:resources] = resources if resources.present?
+      shell
     end
 
     def self.create(project)

@@ -44,7 +44,7 @@ rules:
 
   # Apps
   - apiGroups: ["apps"]
-    resources: [deployments]
+    resources: [deployments, statefulsets]
     verbs: [get, list, watch, create, delete, patch, update]
 
   # RBAC (creates per-workspace Role + RoleBinding)

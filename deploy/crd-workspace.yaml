@@ -148,6 +148,62 @@ spec:
                         entrypoint. Empty ({}) uses Traefik's default cert.
                         May carry secretName/options/domains for a real cert.
 
+                # ---- shell (ADR-029) ----
+                # The shell pod is a control-owned resource like everything
+                # else here; the worker no longer creates it. `replicas` is
+                # NOT a user knob — it is Rails' projection of the worker's
+                # terminal refcount, and the operator consults it only under
+                # mode: lazy.
+                shell:
+                  type: object
+                  properties:
+                    mode:
+                      type: string
+                      enum: [eager, lazy, disabled]
+                      default: eager
+                      description: |
+                        eager   — StatefulSet held at 1, self-healing.
+                        lazy    — StatefulSet at 0, scaled to 1 on demand and
+                                  back down when idle.
+                        disabled— no shell object at all; terminals refused.
+                    replicas:
+                      type: integer
+                      minimum: 0
+                      maximum: 1
+                      default: 0
+                      description: |
+                        Derived demand, written by Rails only. Ignored unless
+                        mode is lazy: under eager the operator holds 1
+                        regardless, so a refcount-driven 0 can never scale an
+                        eager shell down.
+                    imageRepo:
+                      type: string
+                      description: |
+                        Repository, not a full image reference. Shell variants
+                        live in the repo name (carbide2-shell-rust), not the
+                        tag, so /v2/<repo>/tags/list answers "what versions of
+                        this variant exist" without parsing tag strings.
+                    imageTag:
+                      type: string
+                      default: dev
+                    imagePullPolicy:
+                      type: string
+                      enum: [Always, IfNotPresent, Never]
+                      default: IfNotPresent
+                    resources:
+                      type: object
+                      properties:
+                        requests:
+                          type: object
+                          properties:
+                            cpu: { type: string }
+                            memory: { type: string }
+                        limits:
+                          type: object
+                          properties:
+                            cpu: { type: string }
+                            memory: { type: string }
+
                 # ---- resources ----
                 resources:
                   type: object
