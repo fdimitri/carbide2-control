@@ -43,10 +43,17 @@ module CarbideControl
         end
 
         identity = review(token)
-        @mutex.synchronize do
-          @cache[digest] = { identity: identity, at: Process.clock_gettime(Process::CLOCK_MONOTONIC) }
-          # Unbounded growth would otherwise track every token ever seen.
-          @cache.shift while @cache.size > 4096
+        # Only positive results are cached. A nil here is either a bad token or
+        # a transient TokenReview failure, and caching the latter locks a
+        # healthy worker out for CACHE_TTL. The only caller is our own worker,
+        # so there is no bad-token flood a negative cache would be protecting
+        # the apiserver from.
+        if identity
+          @mutex.synchronize do
+            @cache[digest] = { identity: identity, at: Process.clock_gettime(Process::CLOCK_MONOTONIC) }
+            # Unbounded growth would otherwise track every token ever seen.
+            @cache.shift while @cache.size > 4096
+          end
         end
         identity
       end

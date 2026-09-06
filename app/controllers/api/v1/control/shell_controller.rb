@@ -33,7 +33,18 @@ class Api::V1::Control::ShellController < ApplicationController
       return render json: { ready: false, phase: status.phase, reason: status.reason }
     end
 
-    grant = CarbideControl::ExecGrant.mint!(@project)
+    # Only the mint is wrapped: a DB lock wait in demand! or a kube read
+    # failure in ShellStatus is a transient the worker should retry, and
+    # labelling it "could not mint" sends the reader to the wrong place.
+    # Those fall through to Rails' 500, which the worker also retries.
+    begin
+      grant = CarbideControl::ExecGrant.mint!(@project)
+    rescue StandardError => e
+      Rails.logger.error("[shell#create] ws-#{@project.id} mint failed: #{e.class}: #{e.message}")
+      return render json: { ready: false, phase: 'Failed', reason: 'could not mint exec grant' },
+                    status: :service_unavailable
+    end
+
     render json: {
       ready:      true,
       phase:      status.phase,
@@ -42,10 +53,6 @@ class Api::V1::Control::ShellController < ApplicationController
       exec_token: grant[:token],
       expires_at: grant[:expires_at]
     }
-  rescue StandardError => e
-    Rails.logger.error("[shell#create] ws-#{@project.id}: #{e.class}: #{e.message}")
-    render json: { ready: false, phase: 'Failed', reason: 'could not mint exec grant' },
-           status: :service_unavailable
   end
 
   def release
