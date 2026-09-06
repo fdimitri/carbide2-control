@@ -12,29 +12,7 @@ module CarbideControl
     CR_NAMESPACE = ENV.fetch('CONTROL_NAMESPACE', 'carbide-system').freeze
 
     def self.client
-      @client ||= build_client
-    end
-
-    def self.build_client
-      if ENV['KUBERNETES_SERVICE_HOST']
-        # In-cluster: use the mounted ServiceAccount token + CA.
-        Kubeclient::Client.new(
-          "https://#{ENV['KUBERNETES_SERVICE_HOST']}:#{ENV['KUBERNETES_SERVICE_PORT']}/apis/#{GROUP}",
-          VERSION,
-          auth_options: { bearer_token_file: '/var/run/secrets/kubernetes.io/serviceaccount/token' },
-          ssl_options:  { ca_file: '/var/run/secrets/kubernetes.io/serviceaccount/ca.crt' }
-        )
-      else
-        # Out-of-cluster (dev): read ~/.kube/config.
-        config = Kubeclient::Config.read(ENV.fetch('KUBECONFIG', File.expand_path('~/.kube/config')))
-        ctx = config.context
-        Kubeclient::Client.new(
-          "#{ctx.api_endpoint}/apis/#{GROUP}",
-          VERSION,
-          auth_options: ctx.auth_options,
-          ssl_options:  ctx.ssl_options
-        )
-      end
+      @client ||= Kube.client("/apis/#{GROUP}", VERSION)
     end
 
     # Build the Workspace CR spec from a ControlProject. The operator only

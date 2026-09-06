@@ -65,6 +65,16 @@ workspace:
   storageSize: 1Gi
   storageClassName: local-path
 
+# --- Shell sidecar lifecycle (ADR-029). The mode and the timeouts themselves
+# live in the Settings table so they can be changed without a redeploy; only
+# the sweep cadence is a chart value, because it is a property of the process
+# rather than of a workspace. ---
+shell:
+  sweepInterval: 60
+  clockResources:
+    requests: { memory: "128Mi", cpu: "25m" }
+    limits:   { memory: "256Mi", cpu: "200m" }
+
 # --- Postgres (CNPG) used by BOTH the control plane and the workspaces ---
 postgres:
   clusterName: carbide-pg

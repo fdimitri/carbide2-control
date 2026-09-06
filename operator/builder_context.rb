@@ -136,6 +136,19 @@ module Operator
       "ws-#{project_id}-shell"
     end
 
+    # Must match CarbideControl::ExecGrant.service_account_name.
+    def exec_service_account_name
+      "ws-#{project_id}-exec"
+    end
+
+    def rails_service_account_name
+      ENV.fetch("RAILS_SERVICE_ACCOUNT", "control-plane-rails")
+    end
+
+    def control_namespace
+      ENV.fetch("CONTROL_NAMESPACE", "carbide-system")
+    end
+
     def shell_image
       repo = shell[:imageRepo] || shell["imageRepo"] || "carbide2-shell"
       tag  = shell[:imageTag]  || shell["imageTag"]  || "dev"

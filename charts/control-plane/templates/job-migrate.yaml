@@ -52,11 +52,5 @@ spec:
           env:
             - { name: RAILS_ENV, value: "{{ .Values.rails.env }}" }
             - { name: CONTROL_NAMESPACE, value: "{{ .Values.controlNamespace }}" }
-            - { name: POSTGRES_HOST,     value: "{{ .Values.postgres.clusterName }}-rw.{{ .Values.postgres.clusterNamespace }}.svc.cluster.local" }
-            - { name: POSTGRES_PORT,     value: "5432" }
-            - { name: POSTGRES_DB,       value: "{{ .Values.postgres.controlDatabaseName }}" }
-            - name: POSTGRES_USER
-              valueFrom: { secretKeyRef: { name: {{ .Values.postgres.credentialsSecret }}, key: username } }
-            - name: POSTGRES_PASSWORD
-              valueFrom: { secretKeyRef: { name: {{ .Values.postgres.credentialsSecret }}, key: password } }
+            {{- include "control-plane.postgresEnv" . | nindent 12 }}
 {{- end }}

@@ -42,6 +42,16 @@ rules:
     resources: [pods/exec, pods/log, pods/portforward, pods/attach]
     verbs: [get, list, watch, create, delete, deletecollection, patch, update]
 
+  # Same reason: the operator binds carbide-workspace-token-mint to the Rails
+  # SA, so it must hold the permission it is handing out. This is strictly
+  # narrower than `bind` on clusterroles, which would let it delegate anything.
+  # A minted token is bounded by the target SA's own RBAC, and under the
+  # current topology the operator is already the most privileged SA in the
+  # cluster — revisit if that stops being true.
+  - apiGroups: [""]
+    resources: [serviceaccounts/token]
+    verbs: [create]
+
   # Apps
   - apiGroups: ["apps"]
     resources: [deployments, statefulsets]

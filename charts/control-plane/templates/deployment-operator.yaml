@@ -31,6 +31,8 @@ spec:
             - { name: CONTROL_NAMESPACE,   value: "{{ .Values.controlNamespace }}" }
             - { name: PUBLIC_URL_BASE,     value: "{{ .Values.publicUrlBase }}" }
             - { name: WORKSPACE_SHELL_IMAGE, value: "{{ .Values.workspace.shellImage }}" }
+            # Subject of the per-workspace token-mint RoleBinding (ADR-029 §6).
+            - { name: RAILS_SERVICE_ACCOUNT, value: "{{ include "control-plane.fullname" . }}-rails" }
           resources:
             {{- toYaml .Values.operator.resources | nindent 12 }}
 {{- end }}

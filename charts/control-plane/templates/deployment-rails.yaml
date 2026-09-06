@@ -68,13 +68,7 @@ spec:
             - { name: PG_CLUSTER_NAME,        value: "{{ .Values.postgres.clusterName }}" }
             - { name: PG_CLUSTER_NAMESPACE,   value: "{{ .Values.postgres.clusterNamespace }}" }
             - { name: PG_CREDENTIALS_SECRET,  value: "{{ .Values.postgres.credentialsSecret }}" }
-            - { name: POSTGRES_HOST,     value: "{{ .Values.postgres.clusterName }}-rw.{{ .Values.postgres.clusterNamespace }}.svc.cluster.local" }
-            - { name: POSTGRES_PORT,     value: "5432" }
-            - { name: POSTGRES_DB,       value: "{{ .Values.postgres.controlDatabaseName }}" }
-            - name: POSTGRES_USER
-              valueFrom: { secretKeyRef: { name: {{ .Values.postgres.credentialsSecret }}, key: username } }
-            - name: POSTGRES_PASSWORD
-              valueFrom: { secretKeyRef: { name: {{ .Values.postgres.credentialsSecret }}, key: password } }
+            {{- include "control-plane.postgresEnv" . | nindent 12 }}
             - name: JWT_SIGNING_KEY
               valueFrom: { secretKeyRef: { name: {{ .Values.jwt.secretName }}, key: secret } }
           readinessProbe:
@@ -87,4 +81,23 @@ spec:
             periodSeconds: 30
           resources:
             {{- toYaml .Values.rails.resources | nindent 12 }}
+
+        {{- /*
+              The shell idle-down sweep (ADR-029 §5), as a sidecar rather than
+              its own Deployment so "one clock per control replica" is a
+              structural fact instead of two replica counts that have to be
+              kept in step. It is uncoordinated by design; overlapping passes
+              are idempotent.
+        */}}
+        - name: clock
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [bundle, exec, bin/clock]
+          env:
+            - { name: RAILS_ENV,         value: "{{ .Values.rails.env }}" }
+            - { name: CONTROL_NAMESPACE, value: "{{ .Values.controlNamespace }}" }
+            - { name: SHELL_SWEEP_INTERVAL, value: "{{ .Values.shell.sweepInterval }}" }
+            {{- include "control-plane.postgresEnv" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.shell.clockResources | nindent 12 }}
 {{- end }}

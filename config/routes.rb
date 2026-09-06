@@ -41,7 +41,14 @@ Rails.application.routes.draw do
             post  :roll
             post  :token
             get   :health
+            patch :shell_mode
           end
+
+          # ADR-029 §4. GET is the client's display-only status; POST is the
+          # worker's handle and is the only path that returns an exec grant.
+          get    'shell',         to: 'shell#show'
+          post   'shell',         to: 'shell#create'
+          post   'shell/release', to: 'shell#release'
         end
       end
 

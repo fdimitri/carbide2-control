@@ -124,6 +124,26 @@ class Api::V1::Control::WorkspacesController < ApplicationController
     render json: { ok: true }
   end
 
+  # PATCH /api/v1/control/workspaces/:id/shell_mode {mode}
+  # Separate from #update because a mode flip is not a plain column write:
+  # eager -> lazy has to arm the idle latch (ADR-029 §2), so it goes through
+  # ShellLifecycle rather than assigning the attribute here.
+  def shell_mode
+    workspace = find_workspace
+    mode = params[:mode].to_s
+
+    unless ControlProject::SHELL_MODES.include?(mode)
+      return render json: { error: "mode must be one of: #{ControlProject::SHELL_MODES.join(', ')}" },
+                    status: :unprocessable_entity
+    end
+
+    ShellLifecycle.set_mode!(workspace, mode)
+    CarbideControl::WorkspaceApi.merge_patch(
+      workspace, spec: { shell: { mode: workspace.shell_mode, replicas: workspace.shell_replicas.to_i } }
+    )
+    render json: { mode: workspace.shell_mode, replicas: workspace.shell_replicas }
+  end
+
   # GET /api/v1/control/workspace-templates — the seeded resource presets.
   def templates
     render json: WorkspaceTemplate.order(:name).map { |t|
@@ -175,6 +195,7 @@ class Api::V1::Control::WorkspacesController < ApplicationController
       created_at:   workspace.created_at,
       resources:    resources,
       template_name: workspace.template_name,
+      shell_mode:   workspace.shell_mode,
       spec_drift:       spec_drift?(workspace, spec),
       resources_drift:  resources_drift?(workspace, spec),
       image_tag_drift:  image_tag_drift?(workspace, spec)

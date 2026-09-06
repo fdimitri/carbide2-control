@@ -1,0 +1,41 @@
+{{- /*
+  ADR-029 §6. Two fixed, cluster-scoped roles. The operator creates only the
+  per-workspace RoleBindings that point at them, and never creates a Role --
+  binding a fixed ClusterRole needs no `escalate`, and since the operator
+  already holds pods/exec the exec binding needs no `bind` either.
+
+  These are namespace-scoped in effect: a RoleBinding grants the ClusterRole's
+  rules only within the namespace it lives in.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: carbide-workspace-exec
+  labels:
+    {{- include "control-plane.labels" . | nindent 4 }}
+rules:
+  # `kubectl exec` issues a GET before the exec subresource, so both are needed.
+  # No resourceNames: a ws-N namespace holds only the workspace pod the worker
+  # already runs inside, its shell, and the transient migration job -- nothing
+  # the worker could not already touch. Revisit if a per-workspace database pod
+  # ever lands there.
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [pods/exec]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: carbide-workspace-token-mint
+  labels:
+    {{- include "control-plane.labels" . | nindent 4 }}
+rules:
+  # Rails mints ONLY the token; it never creates Role or RoleBinding objects.
+  # The minted token is bounded by the target ServiceAccount's own RBAC, which
+  # is carbide-workspace-exec above.
+  - apiGroups: [""]
+    resources: [serviceaccounts/token]
+    verbs: [create]
