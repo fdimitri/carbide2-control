@@ -1,8 +1,21 @@
 # operator/object_builders/rbac.rb
 #
-# Role + RoleBinding so the workspace pod's worker can manage per-project
-# shell Pods within its own namespace. Equivalent to charts/workspace/
-# templates/rbac.yaml in carbide2-server.
+# Per-workspace RBAC.
+#
+# ADR-029 emptied the workspace pod's own Role. It used to hold pods, pods/exec,
+# pods/log, pods/portforward, configmaps, secrets and persistentvolumeclaims,
+# because the worker created and deleted its own shell pods. It does not any
+# more -- the shell is an operator-owned StatefulSet, and exec happens with a
+# short-lived token minted per request. Standing exec on your own namespace is
+# exactly the thing that made a worker compromise interesting, so the Role is
+# now empty rather than trimmed: nothing in the worker reads a configmap, a
+# secret or a PVC through the API, so leaving those in would be granting
+# permissions for a caller that no longer exists.
+#
+# The Role and RoleBinding are still created, deliberately. Deleting them would
+# leave the previous, wide Role in place on every already-reconciled workspace,
+# since the operator only applies -- it does not garbage-collect objects it has
+# stopped building. Applying an empty ruleset is what actually revokes them.
 
 module Operator
   module ObjectBuilders
@@ -18,23 +31,7 @@ module Operator
             namespace:       ctx.workspace_namespace,
             labels:          ctx.common_labels,
           },
-          rules: [
-            {
-              apiGroups: [""],
-              resources: %w[pods pods/exec pods/log pods/portforward],
-              verbs:     %w[get list watch create delete deletecollection patch update]
-            },
-            {
-              apiGroups: [""],
-              resources: %w[configmaps secrets],
-              verbs:     %w[get list watch]
-            },
-            {
-              apiGroups: [""],
-              resources: %w[persistentvolumeclaims],
-              verbs:     %w[get list watch]
-            }
-          ]
+          rules: []
         }
       end
 

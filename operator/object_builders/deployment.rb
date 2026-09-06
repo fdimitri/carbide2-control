@@ -63,7 +63,12 @@ module Operator
                     ],
                     env: env_vars(ctx, cluster_namespace, cluster_name, creds_secret),
                     volumeMounts: [
-                      { name: "files", mountPath: "/srv/projects" }
+                      { name: "files", mountPath: "/srv/projects" },
+                      {
+                        name:      "control-token",
+                        mountPath: "/var/run/secrets/carbide/control",
+                        readOnly:  true
+                      }
                     ],
                     readinessProbe: {
                       httpGet:             { path: "/up", port: "rails" },
@@ -83,6 +88,24 @@ module Operator
                   {
                     name: "files",
                     persistentVolumeClaim: { claimName: ctx.files_pvc_name }
+                  },
+                  # The worker's identity to control (ADR-029). Audience-scoped
+                  # so the default SA token -- which is accepted by the API
+                  # server -- cannot be replayed at control, and this one cannot
+                  # be replayed at the API server. Projected rather than the
+                  # legacy auto-mount because only projected tokens carry an
+                  # audience, and kubelet rotates them in place.
+                  {
+                    name: "control-token",
+                    projected: {
+                      sources: [{
+                        serviceAccountToken: {
+                          path:              "token",
+                          audience:          "carbide-control",
+                          expirationSeconds: 3600
+                        }
+                      }]
+                    }
                   }
                 ]
               }
@@ -169,13 +192,23 @@ module Operator
 
           # Worker shell backend
           { name: "CARBIDE_BACKEND",            value: "kube" },
-          { name: "CARBIDE_SHELL_IMAGE",        value: ENV.fetch("WORKSPACE_SHELL_IMAGE", "carbide2-shell:dev") },
           { name: "CARBIDE_SHELL_PULL_POLICY",  value: "IfNotPresent" },
           {
             name: "CARBIDE_NAMESPACE",
             valueFrom: { fieldRef: { fieldPath: "metadata.namespace" } }
           },
-          { name: "CARBIDE_PROJECTS_PVC", value: ctx.files_pvc_name }
+          { name: "CARBIDE_PROJECTS_PVC", value: ctx.files_pvc_name },
+
+          # ADR-029: the worker asks control for a shell handle rather than
+          # creating the pod itself, so it needs the control endpoint and the
+          # workspace it is allowed to ask about. CARBIDE_SHELL_IMAGE is gone --
+          # the image is the operator's business now, not the worker's.
+          { name: "WORKSPACE_ID", value: ctx.project_id.to_s },
+          {
+            name: "CONTROL_URL",
+            value: ENV.fetch("CONTROL_INTERNAL_URL",
+                             "http://control-plane.carbide-system.svc.cluster.local:3001")
+          }
         ]
       end
 
