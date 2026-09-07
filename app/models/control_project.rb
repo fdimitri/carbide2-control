@@ -12,8 +12,12 @@ class ControlProject < ApplicationRecord
   has_many :project_memberships, dependent: :destroy
   has_many :users, through: :project_memberships
 
-  validates :name, presence: true, length: { maximum: 64 },
-                   format: { with: /\A[a-zA-Z0-9 _-]+\z/, message: 'may only contain letters, numbers, spaces, hyphens, underscores' }
+  # `name` is display-only: namespace_name / release_name / shell_name /
+  # ingress_path_prefix are all derived from the numeric id (ws-<id>, /w/<id>),
+  # never from `name`. So there is no identifier-safety reason to constrain its
+  # character set — only presence and a sane display length. If it is ever used
+  # in a machine context (label/path/URL), escape it at that point instead.
+  validates :name, presence: true, length: { maximum: 64 }
 
   STATUSES = %w[pending provisioning ready failed terminating].freeze
   validates :status, inclusion: { in: STATUSES }
