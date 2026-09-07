@@ -195,6 +195,7 @@ class Api::V1::Control::WorkspacesController < ApplicationController
       resources:    resources,
       template_name: workspace.template_name,
       shell_mode:   workspace.shell_mode,
+      workspace_image_tag: spec[:workspaceImageTag] || spec["workspaceImageTag"] || workspace.workspace_image_tag,
       spec_drift:       spec_drift?(workspace, spec),
       resources_drift:  resources_drift?(workspace, spec),
       image_tag_drift:  image_tag_drift?(workspace, spec)
