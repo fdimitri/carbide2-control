@@ -27,6 +27,16 @@ module CarbideControl
     MANIFEST_ACCEPT = 'application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json'.freeze
     BUILD_TIME_KEY  = 'CARBIDE_BUILD_TIME'.freeze
 
+    # Process-local memo of build_time_for(repo, tag). The value is immutable
+    # (the tag is a content-addressed SHA, so its build time can never change),
+    # so a cache here is both correct and never needs invalidation. A new tag is
+    # a new key. `nil` is cached too — "no build time" is a stable fact for a
+    # foreign/old image, and caching it avoids re-walking a manifest that will
+    # keep failing. Per-pod only: cross-replica coordination is pointless for an
+    # immutable value, and the process lifetime bounds memory at 1 entry per tag.
+    @cache       = {}
+    @cache_mutex = Mutex.new
+
     module_function
 
     def known_repo?(repo)
@@ -63,7 +73,21 @@ module CarbideControl
 
     # Walk index → platform manifest → config blob and read CARBIDE_BUILD_TIME.
     # Returns the RFC3339 string, or nil on any miss (tag gone, foreign image).
+    # Memoized: build time is immutable per (repo, tag).
     def build_time_for(repo, tag)
+      key = "#{repo}:#{tag}"
+      @cache_mutex.synchronize do
+        return @cache[key] if @cache.key?(key)
+      end
+
+      value = fetch_build_time(repo, tag)
+      @cache_mutex.synchronize { @cache[key] = value }
+      value
+    end
+
+    # The actual (uncached) manifest walk. Isolated so build_time_for can memoize
+    # without re-entering the cache path.
+    def fetch_build_time(repo, tag)
       doc = get("/v2/#{repo}/manifests/#{tag}", accept: INDEX_ACCEPT)
       manifest = if doc['manifests']
                    digest = platform_manifest_digest(doc)
