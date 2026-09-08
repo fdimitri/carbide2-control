@@ -48,7 +48,7 @@ spec:
         - name: migrate
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: [bash, -c, "bundle exec rails db:migrate && bundle exec rails db:seed && bundle exec rails carbide:backfill:workspace_uuids"]
+          command: [bash, -c, "bundle exec rails db:migrate && bundle exec rails db:seed && bundle exec rails carbide:backfill:workspace_uuids && bundle exec rails carbide:backfill:workspace_images"]
           env:
             - { name: RAILS_ENV, value: "{{ .Values.rails.env }}" }
             - { name: CONTROL_NAMESPACE, value: "{{ .Values.controlNamespace }}" }
