@@ -136,6 +136,12 @@ module Operator
       "ws-#{project_id}-shell"
     end
 
+    # StatefulSet ordinal-0 pod. Derivable (nothing publishes it), which is why
+    # the operator can address it by name to force a roll when its image changes.
+    def shell_pod_name
+      "#{shell_name}-0"
+    end
+
     # Must match CarbideControl::ExecGrant.service_account_name.
     def exec_service_account_name
       "ws-#{project_id}-exec"

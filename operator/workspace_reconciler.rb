@@ -191,6 +191,22 @@ module Operator
 
       apply!(KubeClient.core, :service,      ObjectBuilders::Shell.service(ctx))
       apply!(KubeClient.apps, :stateful_set, ObjectBuilders::Shell.build(ctx))
+      force_shell_roll_if_image_changed(ctx)
+    end
+
+    # A StatefulSet with podManagementPolicy OrderedReady only rolls Ready pods,
+    # so a shell stuck in ImagePullBackOff (e.g. after the image tag changes)
+    # never picks up the new image. Compare the live pod's image against the
+    # desired one and delete the pod to force a recreate under the new template.
+    def force_shell_roll_if_image_changed(ctx)
+      pod = KubeClient.core.get_pod(ctx.shell_pod_name, ctx.workspace_namespace)
+      container = Array(pod.spec.containers).find { |c| c.name == "shell" }
+      return if container.nil? || container.image == ctx.shell_image
+
+      @logger.info "[shell] image changed #{container.image.inspect} -> #{ctx.shell_image.inspect}; deleting #{ctx.shell_pod_name}"
+      KubeClient.core.delete_pod(ctx.shell_pod_name, ctx.workspace_namespace)
+    rescue Kubeclient::ResourceNotFoundError
+      nil
     end
 
     def delete_shell(ctx)
