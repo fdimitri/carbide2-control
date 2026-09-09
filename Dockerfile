@@ -25,9 +25,16 @@ ENV LANG=C.UTF-8 \
 ARG META_SHA=unknown
 ARG CONTROL_SHA=unknown
 ARG BUILD_TIME=unknown
+ARG VERSION=unknown
+ARG CODENAME=unknown
 ENV CARBIDE_META_SHA=$META_SHA \
     CARBIDE_CONTROL_SHA=$CONTROL_SHA \
-    CARBIDE_BUILD_TIME=$BUILD_TIME
+    CARBIDE_BUILD_TIME=$BUILD_TIME \
+    CARBIDE_VERSION=$VERSION \
+    CARBIDE_CODENAME=$CODENAME
+# OCI labels — release version + codename, visible in the registry manifest.
+LABEL org.carbide.version=$VERSION \
+      org.carbide.codename=$CODENAME
 
 # OS deps. libpq for pg gem; build tools for native extensions; git for any
 # git-based gems; tzdata for active_support.
