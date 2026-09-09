@@ -26,14 +26,14 @@ module CarbideControl
     INDEX_ACCEPT    = 'application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json'.freeze
     MANIFEST_ACCEPT = 'application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json'.freeze
     BUILD_TIME_KEY  = 'CARBIDE_BUILD_TIME'.freeze
+    VERSION_LABEL   = 'org.carbide.version'.freeze
+    CODENAME_LABEL  = 'org.carbide.codename'.freeze
 
-    # Process-local memo of build_time_for(repo, tag). The value is immutable
-    # (the tag is a content-addressed SHA, so its build time can never change),
-    # so a cache here is both correct and never needs invalidation. A new tag is
-    # a new key. `nil` is cached too — "no build time" is a stable fact for a
-    # foreign/old image, and caching it avoids re-walking a manifest that will
-    # keep failing. Per-pod only: cross-replica coordination is pointless for an
-    # immutable value, and the process lifetime bounds memory at 1 entry per tag.
+    # Process-local memo of image_meta_for(repo, tag). The value is immutable
+    # (the tag is a content-addressed SHA), so a cache here is both correct and
+    # never needs invalidation. A new tag is a new key. nil is cached too —
+    # "unknown" is a stable fact for a foreign/old image. Per-pod only: the
+    # process lifetime bounds memory at 1 entry per tag.
     @cache       = {}
     @cache_mutex = Mutex.new
 
@@ -61,33 +61,38 @@ module CarbideControl
       repos.map { |repo| { repository: repo, tags: tags_for(repo) } }
     end
 
-    # Tags as { tag, build_time } objects, newest build first. build_time is the
-    # image's CARBIDE_BUILD_TIME env (baked at build); nil when a manifest walk
-    # fails or the image predates the env. Sorted here so the workspace image
-    # picker can render newest-first without re-walking.
+    # Tags as { tag, build_time, version, codename } objects, newest build first.
+    # build_time is the image's CARBIDE_BUILD_TIME env; version/codename are the
+    # org.carbide.* OCI labels. All come from one config-blob walk, memoized per
+    # (repo, tag). Sorted here so the workspace image picker renders newest-first.
     def tags_for(repo)
       raw = get("/v2/#{repo}/tags/list")['tags'] || []
-      entries = raw.map { |tag| { tag: tag, build_time: build_time_for(repo, tag) } }
+      entries = raw.map do |tag|
+        meta = image_meta_for(repo, tag) || {}
+        { tag: tag,
+          build_time: meta[:build_time],
+          version:    meta[:version],
+          codename:   meta[:codename] }
+      end
       entries.sort_by { |e| e[:build_time] || '' }.reverse
     end
 
-    # Walk index → platform manifest → config blob and read CARBIDE_BUILD_TIME.
-    # Returns the RFC3339 string, or nil on any miss (tag gone, foreign image).
-    # Memoized: build time is immutable per (repo, tag).
-    def build_time_for(repo, tag)
+    # Walk index → platform manifest → config blob once, returning
+    # { build_time:, version:, codename: } (nil fields absent/unknown). Memoized:
+    # all three are immutable per content-addressed tag.
+    def image_meta_for(repo, tag)
       key = "#{repo}:#{tag}"
       @cache_mutex.synchronize do
         return @cache[key] if @cache.key?(key)
       end
 
-      value = fetch_build_time(repo, tag)
+      value = fetch_image_meta(repo, tag)
       @cache_mutex.synchronize { @cache[key] = value }
       value
     end
 
-    # The actual (uncached) manifest walk. Isolated so build_time_for can memoize
-    # without re-entering the cache path.
-    def fetch_build_time(repo, tag)
+    # The actual (uncached) manifest walk.
+    def fetch_image_meta(repo, tag)
       doc = get("/v2/#{repo}/manifests/#{tag}", accept: INDEX_ACCEPT)
       manifest = if doc['manifests']
                    digest = platform_manifest_digest(doc)
@@ -101,9 +106,17 @@ module CarbideControl
       return nil if config_digest.to_s.empty?
 
       config = get("/v2/#{repo}/blobs/#{config_digest}")
-      env = config.dig('config', 'Env') || []
-      entry = env.find { |e| e.start_with?("#{BUILD_TIME_KEY}=") }
-      entry&.split('=', 2)&.last
+      inner = config['config'] || {}
+
+      env    = inner['Env'] || []
+      labels = inner['Labels'] || {}
+      bt     = env.find { |e| e.start_with?("#{BUILD_TIME_KEY}=") }
+
+      {
+        build_time: bt&.split('=', 2)&.last,
+        version:    labels[VERSION_LABEL],
+        codename:   labels[CODENAME_LABEL],
+      }
     rescue StandardError
       nil
     end
