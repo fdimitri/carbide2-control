@@ -133,6 +133,20 @@ class Api::V1::Control::WorkspacesController < ApplicationController
       )
     end
 
+    if params[:shellImageRepo].present? || params[:shellImageTag].present?
+      # The picker sends the bare variant repo (e.g. "carbide2-shell-rust").
+      # Store it bare; effective_shell_image_repo prefixes it with the registry
+      # host in registry mode, so repo + tag always agree in the CR.
+      workspace.shell_image_repo = params[:shellImageRepo] if params[:shellImageRepo].present?
+      workspace.shell_image_tag  = params[:shellImageTag]  if params[:shellImageTag].present?
+      workspace.save!
+
+      patch[:shell] = (patch[:shell] || {}).merge(
+        imageRepo: workspace.effective_shell_image_repo,
+        imageTag:  workspace.effective_shell_image_tag
+      )
+    end
+
     return render json: { error: 'no patchable fields provided' }, status: :unprocessable_entity if patch.empty?
 
     CarbideControl::WorkspaceApi.merge_patch(workspace, spec: patch) unless patch.empty?
@@ -202,6 +216,8 @@ class Api::V1::Control::WorkspacesController < ApplicationController
       resources:    resources,
       template_name: workspace.template_name,
       shell_mode:   workspace.shell_mode,
+      shell_image_repo: workspace.effective_shell_image_repo,
+      shell_image_tag:  workspace.effective_shell_image_tag,
       workspace_image_tag: spec[:workspaceImageTag] || spec["workspaceImageTag"] || workspace.workspace_image_tag,
       spec_drift:       spec_drift?(workspace, spec),
       resources_drift:  resources_drift?(workspace, spec),

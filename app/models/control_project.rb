@@ -92,9 +92,10 @@ class ControlProject < ApplicationRecord
   end
 
   def effective_shell_image_repo
-    shell_image_repo.presence || Setting.get('workspace_shell_image_repo',
-                                             default: 'carbide2-shell',
-                                             env: 'WORKSPACE_SHELL_IMAGE_REPO')
+    repo = shell_image_repo.presence || Setting.get('workspace_shell_image_repo',
+                                                     default: 'carbide2-shell',
+                                                     env: 'WORKSPACE_SHELL_IMAGE_REPO')
+    registry_prefix(repo)
   end
 
   def effective_shell_image_tag
@@ -104,6 +105,19 @@ class ControlProject < ApplicationRecord
   end
 
   private
+
+  # Prefix a bare shell repo with the self-hosted registry host so the operator
+  # builds a pullable "host:port/repo:tag" ref in registry mode (mirrors how the
+  # chart prefixes workspaceImage). In import mode REGISTRY_URL is empty and the
+  # repo is used bare. Idempotent against an already-prefixed value.
+  def registry_prefix(repo)
+    return repo if repo.blank?
+
+    host = ENV['REGISTRY_URL'].to_s.sub(%r{\A[a-z]+://}, '').sub(%r{/.*\z}, '')
+    return repo if host.empty? || repo.start_with?("#{host}/")
+
+    "#{host}/#{repo}"
+  end
 
   def assign_uuid
     self.uuid ||= SecureRandom.uuid
