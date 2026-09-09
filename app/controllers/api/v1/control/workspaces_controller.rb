@@ -111,6 +111,13 @@ class Api::V1::Control::WorkspacesController < ApplicationController
 
     if params[:workspaceImageTag].present?
       patch[:workspaceImageTag] = params[:workspaceImageTag]
+      # The tag comes from the registry listing for the carbide2 repo, but the
+      # CR also freezes the repo (workspaceImage) at create time. A workspace
+      # created before registry mode still has the bare `carbide2` repo, so
+      # pairing a registry SHA tag with it produces `carbide2:<sha>` and the pod
+      # ImagePullBackOffs against Docker Hub. Re-stamp the repo from the control
+      # plane's current image config so tag + repo always agree.
+      patch[:workspaceImage] = ENV.fetch('WORKSPACE_IMAGE', 'carbide2')
       # Store the intended tag on the control row so spec_drift? has a second
       # side to compare against (the CR is writable out-of-band).
       workspace.update!(workspace_image_tag: params[:workspaceImageTag])
