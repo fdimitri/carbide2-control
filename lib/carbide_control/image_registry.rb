@@ -30,8 +30,10 @@ module CarbideControl
     INDEX_ACCEPT    = 'application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json'.freeze
     MANIFEST_ACCEPT = 'application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json'.freeze
     BUILD_TIME_KEY  = 'CARBIDE_BUILD_TIME'.freeze
-    VERSION_LABEL   = 'org.carbide.version'.freeze
-    CODENAME_LABEL  = 'org.carbide.codename'.freeze
+    VERSION_LABEL    = 'org.carbide.version'.freeze
+    CODENAME_LABEL   = 'org.carbide.codename'.freeze
+    BUILD_TIME_LABEL = 'org.carbide.build_time'.freeze
+    COMMIT_TIME_LABEL = 'org.carbide.commit_time'.freeze
 
     # Process-local memo of image_meta_for(repo, tag). The value is immutable
     # (the tag is a content-addressed SHA), so a cache here is both correct and
@@ -123,11 +125,12 @@ module CarbideControl
       entries = raw.map do |tag|
         meta = image_meta_for(repo, tag) || {}
         { tag: tag,
-          build_time: meta[:build_time],
-          version:    meta[:version],
-          codename:   meta[:codename] }
+          build_time:  meta[:build_time],
+          commit_time: meta[:commit_time],
+          version:     meta[:version],
+          codename:    meta[:codename] }
       end
-      entries.sort_by { |e| e[:build_time] || '' }.reverse
+      entries.sort_by { |e| e[:commit_time] || e[:build_time] || '' }.reverse
     end
 
     # Walk index → platform manifest → config blob once, returning
@@ -163,12 +166,17 @@ module CarbideControl
 
       env    = inner['Env'] || []
       labels = inner['Labels'] || {}
-      bt     = env.find { |e| e.start_with?("#{BUILD_TIME_KEY}=") }
+      # build_time/commit_time come from labels now. Fall back to the old
+      # CARBIDE_BUILD_TIME env for images pushed before the labels existed, so a
+      # mixed registry still reads.
+      bt = labels[BUILD_TIME_LABEL] ||
+           env.find { |e| e.start_with?("#{BUILD_TIME_KEY}=") }&.split('=', 2)&.last
 
       {
-        build_time: bt&.split('=', 2)&.last,
-        version:    labels[VERSION_LABEL],
-        codename:   labels[CODENAME_LABEL],
+        build_time:  bt,
+        commit_time: labels[COMMIT_TIME_LABEL],
+        version:     labels[VERSION_LABEL],
+        codename:    labels[CODENAME_LABEL],
       }
     rescue StandardError
       nil
