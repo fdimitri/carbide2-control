@@ -57,6 +57,10 @@ spec:
             - { name: WORKSPACE_SHELL_IMAGE, value: "{{ .Values.workspace.shellImage }}" }
             - { name: INGRESS_PUBLIC_PORT, value: "{{ .Values.ingress.publicPort }}" }
             - { name: REGISTRY_URL, value: "{{ .Values.registry.url }}" }
+            {{- /* Empty path keeps the flat self-hosted registry shape. */}}
+            - { name: REGISTRY_PATH, value: "{{ .Values.registry.path }}" }
+            - { name: REGISTRY_REPOS, value: "{{ .Values.registry.repos }}" }
+            - { name: REGISTRY_CATALOG, value: "{{ .Values.registry.catalog }}" }
             - name: REGISTRY_CA
               value: |-
 {{ .Values.registry.ca | indent 16 }}

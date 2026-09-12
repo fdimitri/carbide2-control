@@ -160,7 +160,9 @@ module Operator
       redir_mw = ObjectBuilders::IngressRoute.redirect_middleware(ctx)
       redir_ir = ObjectBuilders::IngressRoute.redirect_route(ctx)
       dep    = ObjectBuilders::Deployment.build(ctx)
+      regsecret = ObjectBuilders::RegistrySecret.build(ctx)
 
+      apply!(KubeClient.core,    :secret,                 regsecret) if regsecret
       apply!(KubeClient.core,    :service_account,        sa)
       apply!(KubeClient.rbac,    :role,                   role)
       apply!(KubeClient.rbac,    :role_binding,           rb)

@@ -82,6 +82,9 @@ module Operator
 
         {
           terminationGracePeriodSeconds: 5,
+          # Only when an authenticated registry is in use (GitLab); the shell
+          # image is pulled from the same registry as the workspace image.
+          **({ imagePullSecrets: ctx.image_pull_secrets } if ctx.image_pull_secrets),
           # Runs as the non-root `carbide` user baked into Dockerfile.shell.
           securityContext: { runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000 },
           # kubelet's fsGroup chown does not reliably reach subPath mounts, so

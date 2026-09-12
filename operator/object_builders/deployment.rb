@@ -51,6 +51,9 @@ module Operator
               },
               spec: {
                 serviceAccountName: ctx.workspace_name,
+                # Only set when a registry pull secret is configured (GitLab).
+                # A self-hosted registry authenticates by CA trust, not a secret.
+                **({ imagePullSecrets: ctx.image_pull_secrets } if ctx.image_pull_secrets),
                 initContainers:     init_containers(ctx),
                 containers: [
                   {

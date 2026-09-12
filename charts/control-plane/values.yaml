@@ -33,6 +33,20 @@ clientTier:
 # disables the listing (the endpoint returns 503).
 registry:
   url: ""
+  # Optional namespace between host and image name (a GitLab registry needs
+  # group/project here). Empty => flat registry, the historical self-hosted shape.
+  path: ""
+  # Extra repo names to list when /v2/_catalog is unavailable (GitLab has no
+  # catalog). Shell variants are otherwise undiscoverable without it.
+  repos: ""
+  # Whether the registry exposes /v2/_catalog: auto (probe, then fall back) |
+  # yes | no. "auto" suits both a self-hosted registry and GitLab.
+  catalog: auto
+  # Auth for an authenticated registry (GitLab): a deploy-token user + token.
+  # Blank for a self-hosted registry (auth is CA trust, not credentials).
+  username: ""
+  password: ""
+  pullSecret: ""     # name of a docker-registry Secret the pods pull with
   ca: ""
 
 # --- Rails (dashboard / API) ---

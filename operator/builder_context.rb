@@ -70,6 +70,21 @@ module Operator
       "#{spec[:workspaceImage] || spec["workspaceImage"]}:#{tag}"
     end
 
+    # GitLab (or any authenticated registry): the name of the docker-registry
+    # Secret the workspace pod should pull with. The reconciler creates it from
+    # REGISTRY_USERNAME/REGISTRY_PASSWORD, or it may already exist by this name.
+    def image_pull_secret
+      v = ENV["REGISTRY_PULL_SECRET"].to_s.strip
+      v.empty? ? nil : v
+    end
+
+    def image_pull_secrets
+      image_pull_secret ? [{ name: image_pull_secret }] : nil
+    end
+
+    def registry_username = ENV["REGISTRY_USERNAME"].to_s.strip
+    def registry_password = ENV["REGISTRY_PASSWORD"].to_s
+
     def image_pull_policy
       spec[:workspaceImagePullPolicy] || spec["workspaceImagePullPolicy"] || "IfNotPresent"
     end

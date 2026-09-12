@@ -31,6 +31,13 @@ spec:
             - { name: CONTROL_NAMESPACE,   value: "{{ .Values.controlNamespace }}" }
             - { name: PUBLIC_URL_BASE,     value: "{{ .Values.publicUrlBase }}" }
             - { name: WORKSPACE_SHELL_IMAGE, value: "{{ .Values.workspace.shellImage }}" }
+            {{- /* Authenticated registry (GitLab): the operator builds the pods'
+                   imagePullSecret from these. Blank for a self-hosted registry. */}}
+            - { name: REGISTRY_URL,          value: "{{ .Values.registry.url }}" }
+            - { name: REGISTRY_USERNAME,     value: "{{ .Values.registry.username }}" }
+            - name: REGISTRY_PASSWORD
+              value: "{{ .Values.registry.password }}"
+            - { name: REGISTRY_PULL_SECRET,  value: "{{ .Values.registry.pullSecret }}" }
             # Subject of the per-workspace token-mint RoleBinding (ADR-029 §6).
             - { name: RAILS_SERVICE_ACCOUNT, value: "{{ include "control-plane.fullname" . }}-rails" }
           resources:

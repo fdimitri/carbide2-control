@@ -106,17 +106,26 @@ class ControlProject < ApplicationRecord
 
   private
 
-  # Prefix a bare shell repo with the self-hosted registry host so the operator
-  # builds a pullable "host:port/repo:tag" ref in registry mode (mirrors how the
-  # chart prefixes workspaceImage). In import mode REGISTRY_URL is empty and the
-  # repo is used bare. Idempotent against an already-prefixed value.
+  # Prefix a bare shell repo with the registry so the operator builds a pullable
+  # "host[:port]/[namespace]/repo:tag" ref in registry mode (mirrors how the chart
+  # prefixes workspaceImage). In import mode REGISTRY_URL is empty and the repo is
+  # used bare. Idempotent against an already-prefixed value.
+  #
+  # REGISTRY_PATH is an optional namespace between host and image name (a GitLab
+  # registry needs group/project there). Blank keeps the historical flat shape,
+  # so a self-hosted registry is unaffected.
   def registry_prefix(repo)
     return repo if repo.blank?
 
     host = ENV['REGISTRY_URL'].to_s.sub(%r{\A[a-z]+://}, '').sub(%r{/.*\z}, '')
-    return repo if host.empty? || repo.start_with?("#{host}/")
+    return repo if host.empty?
 
-    "#{host}/#{repo}"
+    ns   = ENV['REGISTRY_PATH'].to_s.gsub(%r{\A/+|/+\z}, '')
+    base = ns.empty? ? host : "#{host}/#{ns}"
+
+    return repo if repo.start_with?("#{base}/")
+
+    "#{base}/#{repo}"
   end
 
   def assign_uuid
