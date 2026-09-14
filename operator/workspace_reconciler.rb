@@ -22,6 +22,7 @@ require "object_builders/database"
 require "object_builders/service"
 require "object_builders/ingressroute"
 require "object_builders/deployment"
+require "object_builders/registry_secret"
 require "object_builders/shell"
 
 module Operator
