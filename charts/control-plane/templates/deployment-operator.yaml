@@ -20,6 +20,7 @@ spec:
         {{- include "control-plane.labels" . | nindent 8 }}
         app.kubernetes.io/component: operator
     spec:
+      {{- include "control-plane.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: {{ include "control-plane.fullname" . }}-operator
       containers:
         - name: operator

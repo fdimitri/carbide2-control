@@ -19,6 +19,7 @@ spec:
         {{- include "control-plane.labels" . | nindent 8 }}
         app.kubernetes.io/component: rails
     spec:
+      {{- include "control-plane.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: {{ include "control-plane.fullname" . }}-rails
       # Schema setup lives in the release-scoped hook Job (job-migrate.yaml).
       # It used to be a per-pod initContainer, which raced itself on db:seed

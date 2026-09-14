@@ -43,6 +43,7 @@ spec:
       restartPolicy: Never
       # The uuid backfill merge-patches Workspace CRs, so this needs the Rails
       # ServiceAccount rather than the namespace default.
+      {{- include "control-plane.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: {{ include "control-plane.fullname" . }}-rails
       containers:
         - name: migrate

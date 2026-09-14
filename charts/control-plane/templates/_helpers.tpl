@@ -30,3 +30,28 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 - name: POSTGRES_PASSWORD
   valueFrom: { secretKeyRef: { name: {{ .Values.postgres.credentialsSecret }}, key: password } }
 {{- end -}}
+
+{{/*
+  The registry host, as containerd and docker key their credentials: host[:port]
+  with the scheme and any path stripped. registry.url carries a scheme and
+  registry.path is a separate value, so neither may leak into the auths key --
+  a dockerconfigjson keyed by anything but the bare host authenticates nothing.
+*/}}
+{{- define "control-plane.registryHost" -}}
+{{- .Values.registry.url | trimPrefix "https://" | trimPrefix "http://" | trimSuffix "/" | splitList "/" | first -}}
+{{- end -}}
+
+{{/*
+  imagePullSecrets for every pod in this chart. An authenticated registry
+  (GitLab) needs one in the pod's OWN namespace: the operator builds the
+  identical object in each ws-<project_id>, and this is the same thing for the
+  control namespace. Renders nothing when registry.pullSecret is unset, which
+  is the self-hosted case -- there the node trusts the CA and no credential
+  exists to carry.
+*/}}
+{{- define "control-plane.imagePullSecrets" -}}
+{{- if .Values.registry.pullSecret }}
+imagePullSecrets:
+  - name: {{ .Values.registry.pullSecret }}
+{{- end }}
+{{- end -}}
