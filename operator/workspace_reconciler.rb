@@ -315,7 +315,13 @@ module Operator
         KubeClient.carbide.merge_patch_workspace(name, { status: status }, @namespace)
       end
     rescue StandardError => e
-      @logger.warn "[reconciler] status update failed: #{e.message}"
+      # ERROR, not warn, and it names the phase that failed to land. A failed
+      # status write is otherwise invisible: the CR simply keeps its previous (or
+      # empty) status, and the dashboard renders the control row's own column,
+      # which nothing advances — so "the operator could not report" and "the pod
+      # is not ready" look identical. This is the one line that tells them apart.
+      @logger.error "[reconciler] status update FAILED for #{name} " \
+                    "(phase=#{phase.inspect}): #{e.class}: #{e.message}"
     end
 
     def deployment_ready?(ctx)

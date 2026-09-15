@@ -179,11 +179,10 @@ class Api::V1::Control::WorkspacesController < ApplicationController
   def health
     workspace = find_workspace
     cr    = CarbideControl::WorkspaceApi.get(workspace) rescue nil
-    phase = cr&.dig(:status, :phase)&.downcase || workspace.status
     probe = WorkspaceHealthProbe.new(workspace).call
     render json: {
       id:        workspace.id,
-      phase:     phase,
+      phase:     WorkspaceStatus.call(control_status: workspace.status, cr: cr),
       reachable: { rails: probe[:rails], ws: probe[:ws] },
       ok:        probe[:ok]
     }
@@ -208,9 +207,17 @@ class Api::V1::Control::WorkspacesController < ApplicationController
       id:           workspace.id,
       uuid:         workspace.uuid,
       name:         workspace.name,
-      status:       cr&.dig(:status, :phase)&.downcase || workspace.status,
-      url:          cr&.dig(:status, :url) || (workspace.status == 'ready' ? workspace_url(workspace) : nil),
+      # nil when nothing is known. The client renders that as "unknown" rather
+      # than substituting a value that was never true.
+      # Resolved in WorkspaceStatus (see its comment): the CR's operator-written
+      # phase, else only the control-row states the CR cannot express, else nil.
+      status:       WorkspaceStatus.call(control_status: workspace.status, cr: cr),
+      # Only the operator writes a URL, and only once the deployment is ready.
+      # The old `workspace.status == 'ready'` fallback was unreachable: nothing
+      # in the app ever writes 'ready' to that column.
+      url:          cr&.dig(:status, :url),
       message:      cr&.dig(:status, :message),
+      last_error:   workspace.last_error,
       owner_email:  workspace.owner.email,
       created_at:   workspace.created_at,
       resources:    resources,
