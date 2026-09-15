@@ -1,8 +1,15 @@
 # Reads "what images exist" from the self-hosted Docker registry (ADR-025).
 #
-# Unauthenticated pull-only reads:
+# Pull-only reads:
 #   GET /v2/_catalog        -> { repositories: [...] }
 #   GET /v2/<repo>/tags/list -> { tags: [...] }
+#
+# A self-hosted registry answers these anonymously. GitLab does not: it replies
+# 401 with a Bearer challenge naming a token realm, and the token is fetched
+# from that realm with the deploy-token credentials. Without that exchange every
+# read here 401s, the controller turns the raise into a 502, and the dashboard
+# reports "no registry configured" for a registry that is configured and
+# reachable.
 #
 # REGISTRY_PATH is an optional namespace between host and repo name (a GitLab
 # registry needs group/project). It goes INSIDE every /v2/<namespaced-repo>/…
@@ -193,19 +200,82 @@ module CarbideControl
       entry && entry['digest']
     end
 
+    # Credentials for an authenticated registry. Blank on a self-hosted one,
+    # where the trust is the CA rather than a login.
+    def registry_username = ENV['REGISTRY_USERNAME'].to_s.strip
+
+    def registry_password = ENV['REGISTRY_PASSWORD'].to_s
+
+    def credentials? = !registry_username.empty?
+
     def get(path, accept: nil)
-      uri  = URI.parse("#{base_url}#{path}")
-      http = Net::HTTP.new(uri.host, uri.port)
-      http.use_ssl = (uri.scheme == 'https')
-      # Trust the self-signed registry via the SYSTEM trust store: the container
-      # entrypoint installs REGISTRY_CA into /usr/local/share/ca-certificates and
-      # runs update-ca-certificates (ADR-025). No per-client ca_file needed.
-      req  = Net::HTTP::Get.new(uri.request_uri)
-      req['Accept'] = accept if accept
-      resp = http.request(req)
+      resp = perform(path, accept: accept)
+      # One retry, and only when the registry itself asked for a token. A 401
+      # with no parseable challenge is a real failure, not something to paper
+      # over with a second guess.
+      if resp.code == '401' && (challenge = bearer_challenge(resp['www-authenticate']))
+        token = fetch_token(challenge)
+        resp = perform(path, accept: accept, token: token) unless token.nil?
+      end
       raise "registry #{path} returned #{resp.code}" unless resp.is_a?(Net::HTTPSuccess)
 
       JSON.parse(resp.body)
+    end
+
+    def perform(path, accept: nil, token: nil)
+      uri = URI.parse("#{base_url}#{path}")
+      req = Net::HTTP::Get.new(uri.request_uri)
+      req['Accept'] = accept if accept
+      # Basic first: a self-hosted registry behind htpasswd accepts it outright,
+      # and GitLab simply answers the challenge that drives the bearer path.
+      if token
+        req['Authorization'] = "Bearer #{token}"
+      elsif credentials?
+        req.basic_auth(registry_username, registry_password)
+      end
+      http_for(uri).request(req)
+    end
+
+    # Bearer realm="…",service="…",scope="…" -> a hash. nil for any other scheme,
+    # which keeps a Basic-only registry on the path it already worked on.
+    def bearer_challenge(header)
+      return nil unless header.to_s.strip.downcase.start_with?('bearer')
+
+      header.scan(/(\w+)="([^"]*)"/).to_h
+    end
+
+    # The scope comes from the challenge rather than being reconstructed here:
+    # the registry already said which repository and action it wants authorized,
+    # and rebuilding that string is how a namespaced repo gets it wrong.
+    def fetch_token(challenge)
+      realm = challenge['realm'].to_s
+      return nil if realm.empty?
+
+      uri = URI.parse(realm)
+      query = { 'service' => challenge['service'], 'scope' => challenge['scope'] }
+              .reject { |_, v| v.to_s.empty? }
+      uri.query = URI.encode_www_form(query) unless query.empty?
+
+      req = Net::HTTP::Get.new(uri.request_uri)
+      req.basic_auth(registry_username, registry_password) if credentials?
+      resp = http_for(uri).request(req)
+      return nil unless resp.is_a?(Net::HTTPSuccess)
+
+      body = begin
+        JSON.parse(resp.body)
+      rescue StandardError
+        {}
+      end
+      body['token'] || body['access_token']
+    end
+
+    # Trust the self-signed registry via the SYSTEM trust store: the container
+    # entrypoint installs REGISTRY_CA into /usr/local/share/ca-certificates and
+    # runs update-ca-certificates (ADR-025). No per-client ca_file needed.
+    def http_for(uri)
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl = (uri.scheme == 'https')
+      http
     end
   end
 end

@@ -60,6 +60,14 @@ spec:
             - { name: REGISTRY_URL, value: "{{ .Values.registry.url }}" }
             {{- /* Empty path keeps the flat self-hosted registry shape. */}}
             - { name: REGISTRY_PATH, value: "{{ .Values.registry.path }}" }
+            {{- /* An authenticated registry (GitLab) answers every /v2 read with
+                   a Bearer challenge; the token is fetched from its realm with
+                   these. Rails had the URL and the CA but not the credentials,
+                   so every listing 401'd and the dashboard reported "no registry
+                   configured". Blank for a self-hosted registry. */}}
+            - { name: REGISTRY_USERNAME, value: "{{ .Values.registry.username }}" }
+            - name: REGISTRY_PASSWORD
+              value: "{{ .Values.registry.password }}"
             - { name: REGISTRY_REPOS, value: "{{ .Values.registry.repos }}" }
             - { name: REGISTRY_CATALOG, value: "{{ .Values.registry.catalog }}" }
             - name: REGISTRY_CA
