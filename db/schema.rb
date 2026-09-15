@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_31_010000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_06_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -19,12 +19,22 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_31_010000) do
     t.string "last_error"
     t.string "name", null: false
     t.bigint "owner_id", null: false
+    t.datetime "shell_idle_since"
+    t.integer "shell_idle_timeout"
+    t.string "shell_image_repo"
+    t.string "shell_image_tag"
+    t.datetime "shell_last_report_at"
+    t.integer "shell_max_report_time"
+    t.string "shell_mode", null: false
+    t.integer "shell_replicas", default: 0, null: false
+    t.integer "shell_terminals", default: 0, null: false
     t.string "status", default: "pending", null: false
     t.string "template_name"
     t.datetime "updated_at", null: false
     t.string "uuid", null: false
     t.string "workspace_image_tag"
     t.index ["owner_id"], name: "index_control_projects_on_owner_id"
+    t.index ["shell_mode", "shell_replicas"], name: "index_control_projects_on_shell_sweep"
     t.index ["status"], name: "index_control_projects_on_status"
     t.index ["uuid"], name: "index_control_projects_on_uuid", unique: true
   end
@@ -89,6 +99,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_31_010000) do
     t.datetime "created_at", null: false
     t.boolean "is_default", default: false, null: false
     t.string "name", null: false
+    t.string "shell_cpu_limit", default: "6", null: false
+    t.string "shell_cpu_request", default: "50m", null: false
+    t.string "shell_memory_limit", default: "8Gi", null: false
+    t.string "shell_memory_request", default: "128Mi", null: false
     t.string "storage_size", default: "1Gi", null: false
     t.datetime "updated_at", null: false
     t.string "workspace_cpu_limit", default: "1", null: false
