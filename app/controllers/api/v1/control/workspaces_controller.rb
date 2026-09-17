@@ -126,11 +126,11 @@ class Api::V1::Control::WorkspacesController < ApplicationController
     if params[:shellMode].present?
       # Not a plain column write: eager -> lazy has to arm the idle latch
       # (ADR-029 §2), so it goes through ShellLifecycle like every other
-      # replicas decision.
+      # replicas decision — which also stamps spec.shell.replicas. Do not add
+      # replicas to this patch: a second writer here would send a value read
+      # before any concurrent demand! and could clobber it.
       ShellLifecycle.set_mode!(workspace, params[:shellMode].to_s)
-      patch[:shell] = (patch[:shell] || {}).merge(
-        mode: workspace.shell_mode, replicas: workspace.shell_replicas.to_i
-      )
+      patch[:shell] = (patch[:shell] || {}).merge(mode: workspace.shell_mode)
     end
 
     if params[:shellImageRepo].present? || params[:shellImageTag].present?

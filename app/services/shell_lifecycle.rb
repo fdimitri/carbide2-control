@@ -160,6 +160,14 @@ class ShellLifecycle
 
     # Runs the block against a locked row, then brings the CR in line with the
     # intent. Returns true when the intent changed.
+    #
+    # The stamp runs INSIDE the lock. Its decision reads shell_replicas against
+    # shell_replicas_applied, and both this writer's save and its CR patch have
+    # to land before another writer can move the intent — otherwise a demand
+    # that commits and patches 1 in the gap gets overwritten by this writer's
+    # stale 0, leaving the CR at 0 with the DB at 1. Held across one kube
+    # PATCH; the alternative is a CR write that cannot be ordered against the
+    # DB value it is supposed to project.
     def apply(project)
       transitioned = false
 
@@ -168,18 +176,19 @@ class ShellLifecycle
         yield project
         project.save!
         transitioned = project.shell_replicas != before
+        stamp_replicas(project)
       end
 
-      stamp_replicas(project)
       transitioned
     end
 
-    # Stamps whenever the applied projection is out of step with the intent, not
-    # only when the intent moved. A failed patch leaves shell_replicas_applied
-    # stale, so the next report (the 60s heartbeat) retries; gating on the
-    # transition alone meant a single failed patch stuck the workspace until an
-    # unrelated intent change — which, for a lazy cold start, never comes. In
-    # the steady state the guard makes this a no-op.
+    # Stamps whenever the applied projection is out of step with the intent,
+    # not only when the intent moved, so a failed patch retries on the next
+    # apply (the 60s report, or the sweep) rather than waiting for a transition
+    # that may never come. In the steady state the guard makes this a no-op.
+    #
+    # Called under the row lock (see apply), so the guard and the value it
+    # patches are both the committed ones.
     def stamp_replicas(project)
       return if project.shell_replicas_applied == project.shell_replicas
 
