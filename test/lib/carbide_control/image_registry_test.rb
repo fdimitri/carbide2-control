@@ -166,3 +166,101 @@ class ImageRegistryAuthTest < Minitest::Test
     assert_equal 'container_registry', parsed['service']
   end
 end
+
+# The manifest walk (index -> platform manifest -> config blob). Only successes
+# are memoized: a nil also covers a transient failure, and caching it would
+# strand the tag until the pod restarts.
+class ImageRegistryMetaCacheTest < Minitest::Test
+  class FakeManifests
+    Response = Struct.new(:code, :body, :headers) do
+      def [](key) = headers[key.downcase]
+      def is_a?(klass) = klass == Net::HTTPSuccess ? code == '200' : super
+    end
+
+    attr_reader :requests
+
+    def initialize(map)
+      @map = map
+      @requests = []
+    end
+
+    def request(_uri, req)
+      @requests << req.path
+      body = @map.find { |frag, _| req.path.include?(frag) }&.last
+      return Response.new('500', '', {}) if body == :error
+
+      Response.new('200', JSON.generate(body || {}), {})
+    end
+  end
+
+  VALID = {
+    'manifests/aaa'        => { 'manifests' => [{ 'platform' => { 'architecture' => 'amd64' },
+                                                  'digest' => 'sha256:plat' }] },
+    'manifests/sha256:plat' => { 'config' => { 'digest' => 'sha256:cfg' } },
+    'blobs/sha256:cfg'      => { 'config' => { 'Labels' => { 'org.carbide.version' => '0.6.0',
+                                                             'org.carbide.codename' => 'magnum',
+                                                             'org.carbide.commit_time' => '2026-09-16T00:00:00Z' },
+                                             'Env' => [] } }
+  }.freeze
+
+  Conn = Struct.new(:uri, :fake) do
+    def request(req) = fake.request(uri, req)
+  end
+
+  def setup
+    @saved = ENV.to_h.slice('REGISTRY_URL', 'REGISTRY_PATH', 'REGISTRY_USERNAME', 'REGISTRY_PASSWORD')
+    ENV['REGISTRY_URL'] = 'https://registry.example:5009'
+    ENV['REGISTRY_PATH'] = 'ns'
+    ENV.delete('REGISTRY_USERNAME')
+    ENV.delete('REGISTRY_PASSWORD')
+    reset_cache
+  end
+
+  def teardown
+    @saved.each { |k, v| ENV[k] = v }
+    reset_cache
+  end
+
+  def reset_cache
+    CarbideControl::ImageRegistry.instance_variable_set(:@cache, {})
+  end
+
+  def run_with(fake)
+    mod  = CarbideControl::ImageRegistry
+    conn = fake
+    mod.singleton_class.send(:alias_method, :http_for_real, :http_for)
+    mod.define_singleton_method(:http_for) { |uri| Conn.new(uri, conn) }
+    yield
+  ensure
+    mod.singleton_class.send(:alias_method, :http_for, :http_for_real)
+  end
+
+  def test_valid_metadata_is_read_and_then_served_from_cache
+    fake   = FakeManifests.new(VALID)
+    first  = run_with(fake) { CarbideControl::ImageRegistry.image_meta_for('carbide2', 'aaa') }
+    reread = run_with(fake) { CarbideControl::ImageRegistry.image_meta_for('carbide2', 'aaa') }
+
+    assert_equal '0.6.0', first[:version]
+    assert_equal 'magnum', first[:codename]
+    assert_equal first, reread
+    assert_equal 1, fake.requests.count { |p| p.include?('manifests/aaa') }, 'second read is cached'
+  end
+
+  # A manifest with no config digest: the walk returns nil and must re-walk.
+  def test_a_malformed_manifest_is_not_cached
+    fake = FakeManifests.new('manifests/bbb' => {})
+    run_with(fake) { assert_nil CarbideControl::ImageRegistry.image_meta_for('carbide2', 'bbb') }
+    run_with(fake) { assert_nil CarbideControl::ImageRegistry.image_meta_for('carbide2', 'bbb') }
+
+    assert_equal 2, fake.requests.count { |p| p.include?('manifests/bbb') }, 'nil is re-walked'
+  end
+
+  # A 500 is transient. Cached, it would strand the tag until the pod restarts.
+  def test_a_failed_fetch_is_not_cached
+    fake = FakeManifests.new('manifests/ccc' => :error)
+    run_with(fake) { assert_nil CarbideControl::ImageRegistry.image_meta_for('carbide2', 'ccc') }
+    run_with(fake) { assert_nil CarbideControl::ImageRegistry.image_meta_for('carbide2', 'ccc') }
+
+    assert_equal 2, fake.requests.count { |p| p.include?('manifests/ccc') }, 'a failed read retries'
+  end
+end

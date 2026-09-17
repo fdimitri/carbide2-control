@@ -42,11 +42,11 @@ module CarbideControl
     BUILD_TIME_LABEL = 'org.carbide.build_time'.freeze
     COMMIT_TIME_LABEL = 'org.carbide.commit_time'.freeze
 
-    # Process-local memo of image_meta_for(repo, tag). The value is immutable
-    # (the tag is a content-addressed SHA), so a cache here is both correct and
-    # never needs invalidation. A new tag is a new key. nil is cached too —
-    # "unknown" is a stable fact for a foreign/old image. Per-pod only: the
-    # process lifetime bounds memory at 1 entry per tag.
+    # Process-local memo of image_meta_for(repo, tag). A successful value is
+    # immutable (the tag is a content-addressed SHA), so caching it is correct
+    # and never needs invalidation; a new tag is a new key. A nil is NOT cached
+    # (see image_meta_for). Per-pod only: the process lifetime bounds memory at
+    # 1 entry per tag.
     @cache       = {}
     @cache_mutex = Mutex.new
 
@@ -141,8 +141,10 @@ module CarbideControl
     end
 
     # Walk index → platform manifest → config blob once, returning
-    # { build_time:, version:, codename: } (nil fields absent/unknown). Memoized:
-    # all three are immutable per content-addressed tag.
+    # { build_time:, version:, codename: } (nil fields absent/unknown).
+    # Memoized per (repo, tag), successes only: a nil also covers a transient
+    # fetch failure, and caching it would leave that tag unreadable until the
+    # pod restarts. A miss just re-walks, which is rare and cheap.
     def image_meta_for(repo, tag)
       key = "#{repo}:#{tag}"
       @cache_mutex.synchronize do
@@ -150,7 +152,7 @@ module CarbideControl
       end
 
       value = fetch_image_meta(repo, tag)
-      @cache_mutex.synchronize { @cache[key] = value }
+      @cache_mutex.synchronize { @cache[key] = value } if value
       value
     end
 
@@ -185,7 +187,16 @@ module CarbideControl
         version:     labels[VERSION_LABEL],
         codename:    labels[CODENAME_LABEL],
       }
-    rescue StandardError
+    rescue StandardError => e
+      # nil means the walk could not complete — an unreadable manifest, a
+      # missing config digest, or a transport/HTTP error — and is not the same
+      # as a pre-0.6.0 image missing the org.carbide.* OCI labels: that image
+      # still returns a hash, just with those fields empty. A bad read should
+      # not be permanent, so log it and return nil; image_meta_for declines to
+      # cache a nil and the next request retries.
+      if defined?(Rails) && Rails.respond_to?(:logger)
+        Rails.logger.warn("[ImageRegistry] metadata fetch failed for #{repo}:#{tag}: #{e.class}: #{e.message}")
+      end
       nil
     end
 
