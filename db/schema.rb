@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_06_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_16_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -27,6 +27,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_06_000001) do
     t.integer "shell_max_report_time"
     t.string "shell_mode", null: false
     t.integer "shell_replicas", default: 0, null: false
+    t.integer "shell_replicas_applied"
     t.integer "shell_terminals", default: 0, null: false
     t.string "status", default: "pending", null: false
     t.string "template_name"
