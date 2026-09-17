@@ -47,6 +47,10 @@ registry:
   username: ""
   password: ""
   pullSecret: ""     # name of a docker-registry Secret the pods pull with
+  # Name of the Secret holding raw username/password for the pods' env. A
+  # separate Secret from pullSecret: the kubelet reads a dockerconfigjson, the
+  # pods read env vars, and one Secret cannot be both types.
+  credentialsSecret: carbide-registry-credentials
   ca: ""
 
 # --- Rails (dashboard / API) ---

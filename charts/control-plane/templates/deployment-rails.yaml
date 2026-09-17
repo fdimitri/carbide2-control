@@ -65,9 +65,10 @@ spec:
                    these. Rails had the URL and the CA but not the credentials,
                    so every listing 401'd and the dashboard reported "no registry
                    configured". Blank for a self-hosted registry. */}}
-            - { name: REGISTRY_USERNAME, value: "{{ .Values.registry.username }}" }
+            - name: REGISTRY_USERNAME
+              valueFrom: { secretKeyRef: { name: {{ .Values.registry.credentialsSecret }}, key: username, optional: true } }
             - name: REGISTRY_PASSWORD
-              value: "{{ .Values.registry.password }}"
+              valueFrom: { secretKeyRef: { name: {{ .Values.registry.credentialsSecret }}, key: password, optional: true } }
             - { name: REGISTRY_REPOS, value: "{{ .Values.registry.repos }}" }
             - { name: REGISTRY_CATALOG, value: "{{ .Values.registry.catalog }}" }
             - name: REGISTRY_CA
