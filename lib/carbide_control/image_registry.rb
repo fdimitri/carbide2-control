@@ -1,19 +1,60 @@
 # Reads "what images exist" from the self-hosted Docker registry (ADR-025).
 #
-# Unauthenticated pull-only reads:
+# Pull-only reads:
 #   GET /v2/_catalog        -> { repositories: [...] }
 #   GET /v2/<repo>/tags/list -> { tags: [...] }
 #
+# A self-hosted registry answers these anonymously. GitLab does not: it replies
+# 401 with a Bearer challenge naming a token realm, and the token is fetched
+# from that realm with the deploy-token credentials. Without that exchange every
+# read here 401s, the controller turns the raise into a 502, and the dashboard
+# reports "no registry configured" for a registry that is configured and
+# reachable.
+#
+# REGISTRY_PATH is an optional namespace between host and repo name (a GitLab
+# registry needs group/project). It goes INSIDE every /v2/<namespaced-repo>/…
+# path, not into REGISTRY_URL. Blank keeps the flat self-hosted shape.
+#
 # The registry is self-signed (mkcert), so control trusts REGISTRY_CA. The
-# three carbide repos are:
-#   carbide2          (workspace: server-worker SHA pair, "<server>-<worker>")
-#   carbide2-control  (control image)
-#   carbide2-shell    (shell image)
+# carbide repos are:
+#   carbide2           (workspace: server-worker SHA pair, "<server>-<worker>")
+#   carbide2-control   (control image)
+#   carbide2-shell*    (shell images)
+#
+# Shell variants are separate repositories rather than tag prefixes (ADR-029
+# §2): /v2/carbide2-shell-rust/tags/list answers "what versions of this variant
+# exist" in one call, with no tag-string sorting and no retention policy shared
+# between unrelated toolchains. Hence a prefix match here instead of a fixed
+# allowlist — a new variant needs no code change to become visible.
 module CarbideControl
   module ImageRegistry
-    REPOS = %w[carbide2 carbide2-control carbide2-shell].freeze
+    REPOS         = %w[carbide2 carbide2-control].freeze
+    REPO_PREFIXES = %w[carbide2-shell].freeze
+
+    # Accept headers for the OCI manifest chain. buildx wraps every image in an
+    # OCI index (even single-platform), so a tag's manifest is an index whose
+    # `manifests[]` holds the per-platform manifest + an attestation entry.
+    INDEX_ACCEPT    = 'application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json'.freeze
+    MANIFEST_ACCEPT = 'application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json'.freeze
+    BUILD_TIME_KEY  = 'CARBIDE_BUILD_TIME'.freeze
+    VERSION_LABEL    = 'org.carbide.version'.freeze
+    CODENAME_LABEL   = 'org.carbide.codename'.freeze
+    BUILD_TIME_LABEL = 'org.carbide.build_time'.freeze
+    COMMIT_TIME_LABEL = 'org.carbide.commit_time'.freeze
+
+    # Process-local memo of image_meta_for(repo, tag). A successful value is
+    # immutable (the tag is a content-addressed SHA), so caching it is correct
+    # and never needs invalidation; a new tag is a new key. A nil is NOT cached
+    # (see image_meta_for). Per-pod only: the process lifetime bounds memory at
+    # 1 entry per tag.
+    @cache       = {}
+    @cache_mutex = Mutex.new
 
     module_function
+
+    def known_repo?(repo)
+      REPOS.include?(repo) || REPO_PREFIXES.any? { |p| repo == p || repo.start_with?("#{p}-") }
+    end
 
     def base_url
       ENV.fetch('REGISTRY_URL').sub(%r{/\z}, '')
@@ -21,34 +62,231 @@ module CarbideControl
       nil
     end
 
+    # Optional namespace between host and image name (blank => flat registry).
+    def registry_path
+      ENV['REGISTRY_PATH'].to_s.gsub(%r{\A/+|/+\z}, '')
+    end
+
+    # Repo name as it appears in the /v2 API path (namespace included).
+    def api_repo(repo)
+      ns = registry_path
+      ns.empty? ? repo : "#{ns}/#{repo}"
+    end
+
+    # Inverse: strip the namespace off a repo name from the API/catalog.
+    def bare_repo(repo)
+      ns = registry_path
+      return repo if ns.empty?
+
+      repo.start_with?("#{ns}/") ? repo.sub("#{ns}/", '') : repo
+    end
+
     def available?
       base_url.present?
     end
 
+    # REGISTRY_CATALOG controls whether we trust /v2/_catalog:
+    #   auto (default) — probe it, fall back when absent (works for both a
+    #                    self-hosted registry and GitLab, at one failed GET).
+    #   yes            — use it; fall back only if the call itself errors.
+    #   no             — never call it (GitLab): go straight to the known set.
+    def catalog_mode
+      ENV['REGISTRY_CATALOG'].to_s.strip.downcase
+    end
+
+    # Repository names are returned BARE (namespacing is an internal detail of
+    # the /v2 paths); the client matches on "carbide2" / "carbide2-shell*".
     def list_images
       raise 'REGISTRY_URL is not configured' unless available?
 
-      catalog = get('/v2/_catalog')
-      repos   = (catalog['repositories'] || []).select { |r| REPOS.include?(r) }
+      repos = case catalog_mode
+              when 'no'  then fallback_repos
+              when 'yes' then catalog_repos || fallback_repos
+              else            catalog_repos || fallback_repos   # auto
+              end
       repos.map { |repo| { repository: repo, tags: tags_for(repo) } }
     end
 
-    def tags_for(repo)
-      get("/v2/#{repo}/tags/list")['tags'] || []
+    # The Docker v2 catalog. Self-hosted registries expose it; GitLab does not,
+    # so a nil here means "fall back to the fixed known set".
+    def catalog_repos
+      catalog = get('/v2/_catalog')
+      (catalog['repositories'] || []).map { |r| bare_repo(r) }.select { |r| known_repo?(r) }
+    rescue StandardError
+      nil
     end
 
-    def get(path)
-      uri  = URI.parse("#{base_url}#{path}")
-      http = Net::HTTP.new(uri.host, uri.port)
-      http.use_ssl = (uri.scheme == 'https')
-      # Trust the self-signed registry via the SYSTEM trust store: the container
-      # entrypoint installs REGISTRY_CA into /usr/local/share/ca-certificates and
-      # runs update-ca-certificates (ADR-025). No per-client ca_file needed.
-      req  = Net::HTTP::Get.new(uri.request_uri)
-      resp = http.request(req)
+    # Without _catalog we can only name repos we already know. Shell variants are
+    # open-ended (undiscoverable this way); REGISTRY_REPOS lists any extra ones.
+    def fallback_repos
+      extra = ENV['REGISTRY_REPOS'].to_s.split(',').map(&:strip).reject(&:empty?)
+      (REPOS + extra).uniq
+    end
+
+    # Tags as { tag, build_time, version, codename } objects, newest build first.
+    # build_time is the image's CARBIDE_BUILD_TIME env; version/codename are the
+    # org.carbide.* OCI labels. All come from one config-blob walk, memoized per
+    # (repo, tag). Sorted here so the workspace image picker renders newest-first.
+    def tags_for(repo)
+      raw = get("/v2/#{api_repo(repo)}/tags/list")['tags'] || []
+      entries = raw.map do |tag|
+        meta = image_meta_for(repo, tag) || {}
+        { tag: tag,
+          build_time:  meta[:build_time],
+          commit_time: meta[:commit_time],
+          version:     meta[:version],
+          codename:    meta[:codename] }
+      end
+      entries.sort_by { |e| e[:commit_time] || e[:build_time] || '' }.reverse
+    end
+
+    # Walk index → platform manifest → config blob once, returning
+    # { build_time:, version:, codename: } (nil fields absent/unknown).
+    # Memoized per (repo, tag), successes only: a nil also covers a transient
+    # fetch failure, and caching it would leave that tag unreadable until the
+    # pod restarts. A miss just re-walks, which is rare and cheap.
+    def image_meta_for(repo, tag)
+      key = "#{repo}:#{tag}"
+      @cache_mutex.synchronize do
+        return @cache[key] if @cache.key?(key)
+      end
+
+      value = fetch_image_meta(repo, tag)
+      @cache_mutex.synchronize { @cache[key] = value } if value
+      value
+    end
+
+    # The actual (uncached) manifest walk.
+    def fetch_image_meta(repo, tag)
+      doc = get("/v2/#{api_repo(repo)}/manifests/#{tag}", accept: INDEX_ACCEPT)
+      manifest = if doc['manifests']
+                   digest = platform_manifest_digest(doc)
+                   digest ? get("/v2/#{api_repo(repo)}/manifests/#{digest}", accept: MANIFEST_ACCEPT) : nil
+                 else
+                   doc # already a single manifest, not an index
+                 end
+      return nil unless manifest
+
+      config_digest = manifest.dig('config', 'digest')
+      return nil if config_digest.to_s.empty?
+
+      config = get("/v2/#{api_repo(repo)}/blobs/#{config_digest}")
+      inner = config['config'] || {}
+
+      env    = inner['Env'] || []
+      labels = inner['Labels'] || {}
+      # build_time/commit_time come from labels now. Fall back to the old
+      # CARBIDE_BUILD_TIME env for images pushed before the labels existed, so a
+      # mixed registry still reads.
+      bt = labels[BUILD_TIME_LABEL] ||
+           env.find { |e| e.start_with?("#{BUILD_TIME_KEY}=") }&.split('=', 2)&.last
+
+      {
+        build_time:  bt,
+        commit_time: labels[COMMIT_TIME_LABEL],
+        version:     labels[VERSION_LABEL],
+        codename:    labels[CODENAME_LABEL],
+      }
+    rescue StandardError => e
+      # nil means the walk could not complete — an unreadable manifest, a
+      # missing config digest, or a transport/HTTP error — and is not the same
+      # as a pre-0.6.0 image missing the org.carbide.* OCI labels: that image
+      # still returns a hash, just with those fields empty. A bad read should
+      # not be permanent, so log it and return nil; image_meta_for declines to
+      # cache a nil and the next request retries.
+      if defined?(Rails) && Rails.respond_to?(:logger)
+        Rails.logger.warn("[ImageRegistry] metadata fetch failed for #{repo}:#{tag}: #{e.class}: #{e.message}")
+      end
+      nil
+    end
+
+    # From an index, pick the real platform manifest — skip the buildx
+    # attestation-manifest entry (architecture/os "unknown").
+    def platform_manifest_digest(index)
+      entry = (index['manifests'] || []).find do |m|
+        p = m['platform'] || {}
+        p['architecture'] && p['architecture'] != 'unknown'
+      end
+      entry ||= (index['manifests'] || []).first
+      entry && entry['digest']
+    end
+
+    # Credentials for an authenticated registry. Blank on a self-hosted one,
+    # where the trust is the CA rather than a login.
+    def registry_username = ENV['REGISTRY_USERNAME'].to_s.strip
+
+    def registry_password = ENV['REGISTRY_PASSWORD'].to_s
+
+    def credentials? = !registry_username.empty?
+
+    def get(path, accept: nil)
+      resp = perform(path, accept: accept)
+      # One retry, and only when the registry itself asked for a token. A 401
+      # with no parseable challenge is a real failure, not something to paper
+      # over with a second guess.
+      if resp.code == '401' && (challenge = bearer_challenge(resp['www-authenticate']))
+        token = fetch_token(challenge)
+        resp = perform(path, accept: accept, token: token) unless token.nil?
+      end
       raise "registry #{path} returned #{resp.code}" unless resp.is_a?(Net::HTTPSuccess)
 
       JSON.parse(resp.body)
+    end
+
+    def perform(path, accept: nil, token: nil)
+      uri = URI.parse("#{base_url}#{path}")
+      req = Net::HTTP::Get.new(uri.request_uri)
+      req['Accept'] = accept if accept
+      # Basic first: a self-hosted registry behind htpasswd accepts it outright,
+      # and GitLab simply answers the challenge that drives the bearer path.
+      if token
+        req['Authorization'] = "Bearer #{token}"
+      elsif credentials?
+        req.basic_auth(registry_username, registry_password)
+      end
+      http_for(uri).request(req)
+    end
+
+    # Bearer realm="…",service="…",scope="…" -> a hash. nil for any other scheme,
+    # which keeps a Basic-only registry on the path it already worked on.
+    def bearer_challenge(header)
+      return nil unless header.to_s.strip.downcase.start_with?('bearer')
+
+      header.scan(/(\w+)="([^"]*)"/).to_h
+    end
+
+    # The scope comes from the challenge rather than being reconstructed here:
+    # the registry already said which repository and action it wants authorized,
+    # and rebuilding that string is how a namespaced repo gets it wrong.
+    def fetch_token(challenge)
+      realm = challenge['realm'].to_s
+      return nil if realm.empty?
+
+      uri = URI.parse(realm)
+      query = { 'service' => challenge['service'], 'scope' => challenge['scope'] }
+              .reject { |_, v| v.to_s.empty? }
+      uri.query = URI.encode_www_form(query) unless query.empty?
+
+      req = Net::HTTP::Get.new(uri.request_uri)
+      req.basic_auth(registry_username, registry_password) if credentials?
+      resp = http_for(uri).request(req)
+      return nil unless resp.is_a?(Net::HTTPSuccess)
+
+      body = begin
+        JSON.parse(resp.body)
+      rescue StandardError
+        {}
+      end
+      body['token'] || body['access_token']
+    end
+
+    # Trust the self-signed registry via the SYSTEM trust store: the container
+    # entrypoint installs REGISTRY_CA into /usr/local/share/ca-certificates and
+    # runs update-ca-certificates (ADR-025). No per-client ca_file needed.
+    def http_for(uri)
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl = (uri.scheme == 'https')
+      http
     end
   end
 end

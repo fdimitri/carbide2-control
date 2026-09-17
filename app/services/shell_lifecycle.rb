@@ -1,0 +1,210 @@
+# The writers of shell_terminals / shell_idle_since / shell_replicas
+# (ADR-029 §2 and §5), kept together deliberately: the falling-edge latch is
+# only correct if EVERY writer maintains it, and scattering these across
+# controllers is how that stops being true.
+#
+# Layering, which the column names alone do not make obvious:
+#   shell_terminals / shell_last_report_at / shell_idle_since  — durable input
+#   shell_replicas                                             — derived intent
+#   shell_replicas_applied                                     — last value written to the CR
+#   spec.shell.replicas                                        — applied output
+#
+# The CR is written when the applied value falls out of step with the intent,
+# which in the steady state means only on an intent TRANSITION — so a
+# heartbeating worker does not produce a CR write per report.
+class ShellLifecycle
+  class << self
+    # A worker report: terminal create/destroy, or a periodic keep-alive.
+    def report!(project, terminals:)
+      terminals = terminals.to_i
+      terminals = 0 if terminals.negative?
+
+      apply(project) do |p|
+        p.shell_last_report_at = Time.current
+        latch_idle(p, terminals)
+        p.shell_terminals = terminals
+        p.shell_replicas  = 1 if terminals.positive? && p.shell_lazy?
+      end
+    end
+
+    # A worker asking for a handle. Demand in its own right: the cold-start path
+    # must not wait for the follow-up `n: 1` release, or it races its own idle
+    # clock.
+    def demand!(project)
+      apply(project) do |p|
+        p.shell_last_report_at = Time.current
+        p.shell_idle_since     = nil
+        p.shell_replicas       = 1 if p.shell_lazy?
+      end
+    end
+
+    # A mode change from the dashboard. Not a plain column write: eager -> lazy
+    # has to arm the latch, because nothing was tracking the falling edge while
+    # the mode was eager and a null latch means condition 1 can never fire.
+    def set_mode!(project, mode)
+      raise ArgumentError, "unknown shell mode #{mode.inspect}" unless ControlProject::SHELL_MODES.include?(mode)
+
+      apply(project) do |p|
+        previous     = p.shell_mode
+        p.shell_mode = mode
+        next if previous == mode
+
+        case mode
+        when 'lazy'
+          if p.shell_terminals.positive?
+            p.shell_replicas = 1
+          else
+            # Eligible for idle-down immediately: the clock starts at the flip.
+            # Assigned, not ||=: a latch left over from an earlier lazy period
+            # is unreadable under eager and must be corrected here, or the
+            # sweep sees hours of "idle" that never happened.
+            p.shell_idle_since = Time.current
+            # disabled -> lazy creates the object at lazy's default of 0;
+            # eager -> lazy leaves a running shell up until the timeout.
+            p.shell_replicas = 0 if previous == 'disabled'
+            # eager -> lazy does not touch replicas, so the value carries over.
+            # A running eager shell is at 1 and stays up until the sweep's idle
+            # timeout. An eager row already at 0 (a shell that was never up)
+            # tears down ON the flip instead: the mode patch carries replicas 0,
+            # the operator honors it under lazy, and the sweep does not act on
+            # the row. That is the intended outcome — no terminals, now lazy, so
+            # nothing should be up.
+          end
+        when 'eager'
+          # Belt-and-braces; the operator holds 1 under eager regardless.
+          p.shell_replicas = 1
+        end
+      end
+    end
+
+    # One sweep pass (ADR-029 §5). Uncoordinated by design: every control
+    # replica runs its own, staggered by SHELL_SWEEP_OFFSET. Redundant passes
+    # are idempotent.
+    def sweep!(logger: Rails.logger)
+      # Rows needing a scale-down decision, plus rows whose CR projection did
+      # not land. The second clause is what retries a failed stamp on the
+      # dead-worker path: intent goes to 0 there, so `shell_replicas = 1` stops
+      # matching, and no report arrives to drive the retry through apply.
+      scope = ControlProject.where(shell_mode: 'lazy')
+                            .where('shell_replicas = 1 ' \
+                                   'OR shell_replicas_applied IS DISTINCT FROM shell_replicas')
+      scaled = 0
+
+      scope.pluck(:id).each do |id|
+        project = ControlProject.find_by(id: id)
+        next if project.nil?
+
+        # Re-evaluated INSIDE the transaction that writes the intent. Deciding
+        # from values read at the start of the pass would let a cold start
+        # landing mid-sweep be overwritten by a `replicas: 0` decided against a
+        # refcount that is no longer current.
+        changed = apply(project) do |p|
+          next unless p.shell_lazy? && p.shell_replicas == 1
+
+          if worker_gone?(p)
+            # Scaling down on liveness must also reset the refcount. Leaving a
+            # dead worker's claim in place means the falling edge never re-arms,
+            # the latch stays null, and condition 1 can never fire for this
+            # workspace again.
+            p.shell_terminals  = 0
+            p.shell_idle_since = Time.current
+            p.shell_replicas   = 0
+            logger.info("[shell-sweep] ws-#{p.id} scaling down: worker silent")
+          elsif idle_long_enough?(p)
+            p.shell_replicas = 0
+            logger.info("[shell-sweep] ws-#{p.id} scaling down: idle")
+          end
+        end
+
+        scaled += 1 if changed
+      end
+
+      scaled
+    end
+
+    private
+
+    # §2's latch rules. The asymmetry is the point: demand nulls the latch
+    # immediately, but only a TRANSITION to zero sets it. Re-latching on every
+    # `n: 0` heartbeat would restart the idle clock forever, which is the exact
+    # failure this column exists to avoid.
+    def latch_idle(project, terminals)
+      if terminals.positive?
+        project.shell_idle_since = nil
+      elsif project.shell_terminals.to_i.positive?
+        project.shell_idle_since = Time.current
+      end
+    end
+
+    # Condition 1: genuinely no terminals for long enough, measured from the
+    # falling edge rather than the last report so a healthy worker heartbeating
+    # `n: 0` does not reset its own idle clock.
+    def idle_long_enough?(project)
+      return false unless project.shell_terminals.to_i.zero?
+
+      since = project.shell_idle_since
+      return false if since.nil?
+
+      Time.current - since > project.effective_shell_idle_timeout
+    end
+
+    # Condition 2: the worker has stopped reporting, so it is frozen or dead
+    # regardless of what its last `n` claimed. A frozen worker with a stale
+    # `n: 3` is not three live terminals; it is an orphaned shell.
+    def worker_gone?(project)
+      last = project.shell_last_report_at
+      return false if last.nil?
+
+      Time.current - last > project.effective_shell_max_report_time
+    end
+
+    # Runs the block against a locked row, then brings the CR in line with the
+    # intent. Returns true when the intent changed.
+    #
+    # The stamp runs INSIDE the lock. Its decision reads shell_replicas against
+    # shell_replicas_applied, and both this writer's save and its CR patch have
+    # to land before another writer can move the intent — otherwise a demand
+    # that commits and patches 1 in the gap gets overwritten by this writer's
+    # stale 0, leaving the CR at 0 with the DB at 1. Held across one kube
+    # PATCH; the alternative is a CR write that cannot be ordered against the
+    # DB value it is supposed to project.
+    def apply(project)
+      transitioned = false
+
+      project.with_lock do
+        before = project.shell_replicas
+        yield project
+        project.save!
+        transitioned = project.shell_replicas != before
+        stamp_replicas(project)
+      end
+
+      transitioned
+    end
+
+    # Stamps whenever the applied projection is out of step with the intent,
+    # not only when the intent moved, so a failed patch retries on the next
+    # apply (the 60s report, or the sweep) rather than waiting for a transition
+    # that may never come. In the steady state the guard makes this a no-op.
+    #
+    # Called under the row lock (see apply), so the guard and the value it
+    # patches are both the committed ones.
+    def stamp_replicas(project)
+      return if project.shell_replicas_applied == project.shell_replicas
+
+      begin
+        CarbideControl::WorkspaceApi.merge_patch(
+          project, spec: { shell: { replicas: project.shell_replicas.to_i } }
+        )
+      rescue StandardError => e
+        # shell_replicas_applied is deliberately left unchanged so the next
+        # apply retries. The DB intent is the durable value, and failing the
+        # worker's report over a stale CR would be worse.
+        Rails.logger.error("[ShellLifecycle] CR stamp failed for ws-#{project.id}: #{e.message}")
+        return
+      end
+
+      project.update_column(:shell_replicas_applied, project.shell_replicas)
+    end
+  end
+end

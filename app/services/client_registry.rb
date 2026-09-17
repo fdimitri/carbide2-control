@@ -14,7 +14,7 @@
 # from the workspace client, so the two never collide in the store.
 #
 # Two backends sit behind the same interface:
-#   - FsBackend (dev + tests): the store lives under public/clients so
+#   - FsBackend (tests): the store lives under public/clients so
 #     ActionDispatch::Static serves the assets on the same origin. Selected by
 #     the `store:` kwarg or CARBIDE_CLIENT_STORE.
 #   - HttpBackend (in-cluster): the store is the MinIO static tier reached over

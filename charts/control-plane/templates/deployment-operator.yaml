@@ -20,6 +20,7 @@ spec:
         {{- include "control-plane.labels" . | nindent 8 }}
         app.kubernetes.io/component: operator
     spec:
+      {{- include "control-plane.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: {{ include "control-plane.fullname" . }}-operator
       containers:
         - name: operator
@@ -31,6 +32,16 @@ spec:
             - { name: CONTROL_NAMESPACE,   value: "{{ .Values.controlNamespace }}" }
             - { name: PUBLIC_URL_BASE,     value: "{{ .Values.publicUrlBase }}" }
             - { name: WORKSPACE_SHELL_IMAGE, value: "{{ .Values.workspace.shellImage }}" }
+            {{- /* Authenticated registry (GitLab): the operator builds the pods'
+                   imagePullSecret from these. Blank for a self-hosted registry. */}}
+            - { name: REGISTRY_URL,          value: "{{ .Values.registry.url }}" }
+            - name: REGISTRY_USERNAME
+              valueFrom: { secretKeyRef: { name: {{ .Values.registry.credentialsSecret }}, key: username, optional: true } }
+            - name: REGISTRY_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ .Values.registry.credentialsSecret }}, key: password, optional: true } }
+            - { name: REGISTRY_PULL_SECRET,  value: "{{ .Values.registry.pullSecret }}" }
+            # Subject of the per-workspace token-mint RoleBinding (ADR-029 §6).
+            - { name: RAILS_SERVICE_ACCOUNT, value: "{{ include "control-plane.fullname" . }}-rails" }
           resources:
             {{- toYaml .Values.operator.resources | nindent 12 }}
 {{- end }}

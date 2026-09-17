@@ -22,6 +22,8 @@ require "object_builders/database"
 require "object_builders/service"
 require "object_builders/ingressroute"
 require "object_builders/deployment"
+require "object_builders/registry_secret"
+require "object_builders/shell"
 
 module Operator
   class WorkspaceReconciler
@@ -159,10 +161,16 @@ module Operator
       redir_mw = ObjectBuilders::IngressRoute.redirect_middleware(ctx)
       redir_ir = ObjectBuilders::IngressRoute.redirect_route(ctx)
       dep    = ObjectBuilders::Deployment.build(ctx)
+      regsecret = ObjectBuilders::RegistrySecret.build(ctx)
 
+      apply!(KubeClient.core,    :secret,                 regsecret) if regsecret
       apply!(KubeClient.core,    :service_account,        sa)
       apply!(KubeClient.rbac,    :role,                   role)
       apply!(KubeClient.rbac,    :role_binding,           rb)
+      apply!(KubeClient.core,    :service_account, ObjectBuilders::Rbac.exec_service_account(ctx))
+      apply!(KubeClient.rbac,    :role_binding,    ObjectBuilders::Rbac.exec_role_binding(ctx))
+      apply!(KubeClient.rbac,    :role_binding,    ObjectBuilders::Rbac.token_mint_role_binding(ctx))
+      apply!(KubeClient.rbac,    :role_binding,    ObjectBuilders::Rbac.status_role_binding(ctx))
       apply!(KubeClient.core,    :persistent_volume_claim, pvc)
       apply!(KubeClient.core,    :service,                svc)
       apply!(KubeClient.traefik, :middleware,             mw)
@@ -172,7 +180,48 @@ module Operator
       apply!(KubeClient.traefik, :middleware,    redir_mw) if redir_mw
       apply!(KubeClient.traefik, :ingress_route, redir_ir) if redir_ir
       apply!(KubeClient.apps,    :deployment,             dep)
+      apply_shell(ctx)
       replicate_pg_credentials(ctx)
+    end
+
+    # ADR-029 §3. `disabled` is an object delete rather than replicas 0, so a
+    # disabled workspace carries no shell object at all.
+    def apply_shell(ctx)
+      unless ctx.shell_enabled?
+        delete_shell(ctx)
+        return
+      end
+
+      apply!(KubeClient.core, :service,      ObjectBuilders::Shell.service(ctx))
+      apply!(KubeClient.apps, :stateful_set, ObjectBuilders::Shell.build(ctx))
+      force_shell_roll_if_image_changed(ctx)
+    end
+
+    # A StatefulSet with podManagementPolicy OrderedReady only rolls Ready pods,
+    # so a shell stuck in ImagePullBackOff (e.g. after the image tag changes)
+    # never picks up the new image. Compare the live pod's image against the
+    # desired one and delete the pod to force a recreate under the new template.
+    def force_shell_roll_if_image_changed(ctx)
+      pod = KubeClient.core.get_pod(ctx.shell_pod_name, ctx.workspace_namespace)
+      container = Array(pod.spec.containers).find { |c| c.name == "shell" }
+      return if container.nil? || container.image == ctx.shell_image
+
+      @logger.info "[shell] image changed #{container.image.inspect} -> #{ctx.shell_image.inspect}; deleting #{ctx.shell_pod_name}"
+      KubeClient.core.delete_pod(ctx.shell_pod_name, ctx.workspace_namespace)
+    rescue Kubeclient::ResourceNotFoundError
+      nil
+    end
+
+    def delete_shell(ctx)
+      KubeClient.apps.delete_stateful_set(ctx.shell_name, ctx.workspace_namespace)
+    rescue Kubeclient::ResourceNotFoundError
+      nil
+    ensure
+      begin
+        KubeClient.core.delete_service(ctx.shell_name, ctx.workspace_namespace)
+      rescue Kubeclient::ResourceNotFoundError
+        nil
+      end
     end
 
     # The workspace Deployment mounts `postgres.credentialsSecret` as env. The
@@ -266,7 +315,13 @@ module Operator
         KubeClient.carbide.merge_patch_workspace(name, { status: status }, @namespace)
       end
     rescue StandardError => e
-      @logger.warn "[reconciler] status update failed: #{e.message}"
+      # ERROR, not warn, and it names the phase that failed to land. A failed
+      # status write is otherwise invisible: the CR simply keeps its previous (or
+      # empty) status, and the dashboard renders the control row's own column,
+      # which nothing advances — so "the operator could not report" and "the pod
+      # is not ready" look identical. This is the one line that tells them apart.
+      @logger.error "[reconciler] status update FAILED for #{name} " \
+                    "(phase=#{phase.inspect}): #{e.class}: #{e.message}"
     end
 
     def deployment_ready?(ctx)

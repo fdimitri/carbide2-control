@@ -12,11 +12,19 @@ class ControlProject < ApplicationRecord
   has_many :project_memberships, dependent: :destroy
   has_many :users, through: :project_memberships
 
-  validates :name, presence: true, length: { maximum: 64 },
-                   format: { with: /\A[a-zA-Z0-9 _-]+\z/, message: 'may only contain letters, numbers, spaces, hyphens, underscores' }
+  # `name` is display-only: namespace_name / release_name / shell_name /
+  # ingress_path_prefix are all derived from the numeric id (ws-<id>, /w/<id>),
+  # never from `name`. So there is no identifier-safety reason to constrain its
+  # character set — only presence and a sane display length. If it is ever used
+  # in a machine context (label/path/URL), escape it at that point instead.
+  validates :name, presence: true, length: { maximum: 64 }
 
   STATUSES = %w[pending provisioning ready failed terminating].freeze
   validates :status, inclusion: { in: STATUSES }
+
+  # ADR-029 §2. eager: always up. lazy: 0↔1 on demand. disabled: no object.
+  SHELL_MODES = %w[eager lazy disabled].freeze
+  validates :shell_mode, inclusion: { in: SHELL_MODES }
 
   after_initialize { self.status ||= 'pending' }
 
@@ -24,6 +32,7 @@ class ControlProject < ApplicationRecord
   # 1:1), carried in the token's aud/project_uuid claims.
   before_validation :assign_uuid, on: :create
   before_validation :assign_default_template, on: :create
+  before_validation :assign_default_shell_mode, on: :create
 
   # The assigned resource preset (DB-authoritative). Resolves to the current
   # WorkspaceTemplate row; nil means "no preset assigned" (custom).
@@ -45,7 +54,79 @@ class ControlProject < ApplicationRecord
     "/w/#{id}"
   end
 
+  # --- shell (ADR-029) ---------------------------------------------------
+
+  # Placeholder name, known wrong: a workspace can hold several projects, so
+  # this asserts a 1:1 that does not hold, and the identifier should be the
+  # project UUID rather than the numeric id. Survives only because project UUID
+  # currently equals workspace UUID. Pending the ADR-030 identity decision.
+  def shell_name
+    "ws-#{id}-shell"
+  end
+
+  # The StatefulSet's ordinal-0 pod. Derivable rather than discoverable, which
+  # is the whole reason §3 picked a StatefulSet: nothing has to publish this
+  # name anywhere for it to stay correct.
+  def shell_pod_name
+    "#{shell_name}-0"
+  end
+
+  def shell_disabled?
+    shell_mode == 'disabled'
+  end
+
+  def shell_lazy?
+    shell_mode == 'lazy'
+  end
+
+  def effective_shell_idle_timeout
+    shell_idle_timeout || Setting.get('workspace_shell_idle_timeout',
+                                      default: 4 * 3600,
+                                      env: 'WORKSPACE_SHELL_IDLE_TIMEOUT')
+  end
+
+  def effective_shell_max_report_time
+    shell_max_report_time || Setting.get('workspace_shell_max_report_time',
+                                         default: 300,
+                                         env: 'WORKSPACE_SHELL_MAX_REPORT_TIME')
+  end
+
+  def effective_shell_image_repo
+    repo = shell_image_repo.presence || Setting.get('workspace_shell_image_repo',
+                                                     default: 'carbide2-shell',
+                                                     env: 'WORKSPACE_SHELL_IMAGE_REPO')
+    registry_prefix(repo)
+  end
+
+  def effective_shell_image_tag
+    shell_image_tag.presence || Setting.get('workspace_shell_image_tag',
+                                            default: 'dev',
+                                            env: 'WORKSPACE_SHELL_IMAGE_TAG')
+  end
+
   private
+
+  # Prefix a bare shell repo with the registry so the operator builds a pullable
+  # "host[:port]/[namespace]/repo:tag" ref in registry mode (mirrors how the chart
+  # prefixes workspaceImage). In import mode REGISTRY_URL is empty and the repo is
+  # used bare. Idempotent against an already-prefixed value.
+  #
+  # REGISTRY_PATH is an optional namespace between host and image name (a GitLab
+  # registry needs group/project there). Blank keeps the historical flat shape,
+  # so a self-hosted registry is unaffected.
+  def registry_prefix(repo)
+    return repo if repo.blank?
+
+    host = ENV['REGISTRY_URL'].to_s.sub(%r{\A[a-z]+://}, '').sub(%r{/.*\z}, '')
+    return repo if host.empty?
+
+    ns   = ENV['REGISTRY_PATH'].to_s.gsub(%r{\A/+|/+\z}, '')
+    base = ns.empty? ? host : "#{host}/#{ns}"
+
+    return repo if repo.start_with?("#{base}/")
+
+    "#{base}/#{repo}"
+  end
 
   def assign_uuid
     self.uuid ||= SecureRandom.uuid
@@ -53,5 +134,14 @@ class ControlProject < ApplicationRecord
 
   def assign_default_template
     self.template_name ||= WorkspaceTemplate.find_by(is_default: true)&.name
+  end
+
+  # The resolved mode is recorded per-workspace and then stamped into the CR,
+  # so the operator never has to know the global default existed (ADR-025).
+  def assign_default_shell_mode
+    self.shell_mode ||= Setting.get('workspace_shell_mode',
+                                    default: 'eager',
+                                    env: 'WORKSPACE_SHELL_MODE').to_s
+    self.shell_replicas = shell_mode == 'eager' ? 1 : 0
   end
 end

@@ -1,0 +1,55 @@
+#!/usr/bin/env ruby
+# bin/clock — the shell idle-down sweep (ADR-029 §5).
+#
+# Deliberately uncoordinated: no leader election, no shared lock, no queue, no
+# persisted cursor. Every control replica runs its own copy, staggered by
+# SHELL_SWEEP_OFFSET so they do not collide on the same CR write. Redundant
+# passes are idempotent, so the cost of overlap is a wasted query rather than a
+# wrong answer. ADR-030 revisits this; it is the fast path to something that
+# works, and it is accepted as such.
+#
+# Unlike bin/operator this DOES need the full Rails stack -- the sweep reads
+# and writes control_projects.
+
+require_relative "../config/environment"
+
+$stdout.sync = true
+$stderr.sync = true
+
+INTERVAL = Integer(ENV.fetch("SHELL_SWEEP_INTERVAL", "60"))
+
+# Without a stable ordinal (control is a Deployment, not a StatefulSet) there
+# is nothing to derive a deterministic time slice from, so an unset offset
+# becomes a random one. Replicas still stagger; they just do not stagger
+# reproducibly. Giving control a stable ordinal is an ADR-030 question.
+OFFSET = if ENV["SHELL_SWEEP_OFFSET"].to_s.empty?
+           rand(INTERVAL)
+         else
+           Integer(ENV["SHELL_SWEEP_OFFSET"])
+         end
+
+logger = Rails.logger
+logger.info("[clock] shell sweep starting: interval=#{INTERVAL}s offset=#{OFFSET}s")
+
+running = true
+%w[INT TERM].each { |sig| Signal.trap(sig) { running = false } }
+
+sleep OFFSET
+
+while running
+  started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+  begin
+    scaled = ShellLifecycle.sweep!(logger: logger)
+    logger.debug("[clock] sweep done: #{scaled} scaled down") if scaled.zero?
+  rescue StandardError => e
+    # A failed pass must not kill the loop: the next one re-derives everything
+    # from the database, so there is no state to recover.
+    logger.error("[clock] sweep failed: #{e.class}: #{e.message}")
+  end
+
+  elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+  sleep([INTERVAL - elapsed, 1].max) if running
+end
+
+logger.info("[clock] stopped")

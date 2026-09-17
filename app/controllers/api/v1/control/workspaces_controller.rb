@@ -82,12 +82,21 @@ class Api::V1::Control::WorkspacesController < ApplicationController
       return render json: { error: 'storage fields are not patchable (ADR-016)' }, status: :unprocessable_entity
     end
 
+    if params[:shellMode].present? && ControlProject::SHELL_MODES.exclude?(params[:shellMode].to_s)
+      return render json: { error: "shellMode must be one of: #{ControlProject::SHELL_MODES.join(', ')}" },
+                    status: :unprocessable_entity
+    end
+
     patch    = {}
 
     if params[:template_name].present?
       template = WorkspaceTemplate.find_by!(name: params[:template_name])
       workspace.update!(template_name: template.name)
       patch[:resources] = template.resources
+      # Shell sizing is template-driven too (ADR-016 §3), so retemplating has to
+      # resize both pods or the shell keeps the old template's limits until
+      # something else triggers a full apply.
+      patch[:shell] = { resources: template.shell_resources }
     end
 
     if params[:resources].present?
@@ -102,9 +111,40 @@ class Api::V1::Control::WorkspacesController < ApplicationController
 
     if params[:workspaceImageTag].present?
       patch[:workspaceImageTag] = params[:workspaceImageTag]
+      # The tag comes from the registry listing for the carbide2 repo, but the
+      # CR also freezes the repo (workspaceImage) at create time. A workspace
+      # created before registry mode still has the bare `carbide2` repo, so
+      # pairing a registry SHA tag with it produces `carbide2:<sha>` and the pod
+      # ImagePullBackOffs against Docker Hub. Re-stamp the repo from the control
+      # plane's current image config so tag + repo always agree.
+      patch[:workspaceImage] = ENV.fetch('WORKSPACE_IMAGE', 'carbide2')
       # Store the intended tag on the control row so spec_drift? has a second
       # side to compare against (the CR is writable out-of-band).
       workspace.update!(workspace_image_tag: params[:workspaceImageTag])
+    end
+
+    if params[:shellMode].present?
+      # Not a plain column write: eager -> lazy has to arm the idle latch
+      # (ADR-029 §2), so it goes through ShellLifecycle like every other
+      # replicas decision — which also stamps spec.shell.replicas. Do not add
+      # replicas to this patch: a second writer here would send a value read
+      # before any concurrent demand! and could clobber it.
+      ShellLifecycle.set_mode!(workspace, params[:shellMode].to_s)
+      patch[:shell] = (patch[:shell] || {}).merge(mode: workspace.shell_mode)
+    end
+
+    if params[:shellImageRepo].present? || params[:shellImageTag].present?
+      # The picker sends the bare variant repo (e.g. "carbide2-shell-rust").
+      # Store it bare; effective_shell_image_repo prefixes it with the registry
+      # host in registry mode, so repo + tag always agree in the CR.
+      workspace.shell_image_repo = params[:shellImageRepo] if params[:shellImageRepo].present?
+      workspace.shell_image_tag  = params[:shellImageTag]  if params[:shellImageTag].present?
+      workspace.save!
+
+      patch[:shell] = (patch[:shell] || {}).merge(
+        imageRepo: workspace.effective_shell_image_repo,
+        imageTag:  workspace.effective_shell_image_tag
+      )
     end
 
     return render json: { error: 'no patchable fields provided' }, status: :unprocessable_entity if patch.empty?
@@ -139,11 +179,10 @@ class Api::V1::Control::WorkspacesController < ApplicationController
   def health
     workspace = find_workspace
     cr    = CarbideControl::WorkspaceApi.get(workspace) rescue nil
-    phase = cr&.dig(:status, :phase)&.downcase || workspace.status
     probe = WorkspaceHealthProbe.new(workspace).call
     render json: {
       id:        workspace.id,
-      phase:     phase,
+      phase:     WorkspaceStatus.call(control_status: workspace.status, cr: cr),
       reachable: { rails: probe[:rails], ws: probe[:ws] },
       ok:        probe[:ok]
     }
@@ -168,13 +207,25 @@ class Api::V1::Control::WorkspacesController < ApplicationController
       id:           workspace.id,
       uuid:         workspace.uuid,
       name:         workspace.name,
-      status:       cr&.dig(:status, :phase)&.downcase || workspace.status,
-      url:          cr&.dig(:status, :url) || (workspace.status == 'ready' ? workspace_url(workspace) : nil),
+      # nil when nothing is known. The client renders that as "unknown" rather
+      # than substituting a value that was never true.
+      # Resolved in WorkspaceStatus (see its comment): the CR's operator-written
+      # phase, else only the control-row states the CR cannot express, else nil.
+      status:       WorkspaceStatus.call(control_status: workspace.status, cr: cr),
+      # Only the operator writes a URL, and only once the deployment is ready.
+      # The old `workspace.status == 'ready'` fallback was unreachable: nothing
+      # in the app ever writes 'ready' to that column.
+      url:          cr&.dig(:status, :url),
       message:      cr&.dig(:status, :message),
+      last_error:   workspace.last_error,
       owner_email:  workspace.owner.email,
       created_at:   workspace.created_at,
       resources:    resources,
       template_name: workspace.template_name,
+      shell_mode:   workspace.shell_mode,
+      shell_image_repo: workspace.effective_shell_image_repo,
+      shell_image_tag:  workspace.effective_shell_image_tag,
+      workspace_image_tag: spec[:workspaceImageTag] || spec["workspaceImageTag"] || workspace.workspace_image_tag,
       spec_drift:       spec_drift?(workspace, spec),
       resources_drift:  resources_drift?(workspace, spec),
       image_tag_drift:  image_tag_drift?(workspace, spec)

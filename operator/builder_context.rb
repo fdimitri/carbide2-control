@@ -70,6 +70,21 @@ module Operator
       "#{spec[:workspaceImage] || spec["workspaceImage"]}:#{tag}"
     end
 
+    # GitLab (or any authenticated registry): the name of the docker-registry
+    # Secret the workspace pod should pull with. The reconciler creates it from
+    # REGISTRY_USERNAME/REGISTRY_PASSWORD, or it may already exist by this name.
+    def image_pull_secret
+      v = ENV["REGISTRY_PULL_SECRET"].to_s.strip
+      v.empty? ? nil : v
+    end
+
+    def image_pull_secrets
+      image_pull_secret ? [{ name: image_pull_secret }] : nil
+    end
+
+    def registry_username = ENV["REGISTRY_USERNAME"].to_s.strip
+    def registry_password = ENV["REGISTRY_PASSWORD"].to_s
+
     def image_pull_policy
       spec[:workspaceImagePullPolicy] || spec["workspaceImagePullPolicy"] || "IfNotPresent"
     end
@@ -104,6 +119,88 @@ module Operator
 
     def paused?
       spec[:paused] || spec["paused"] || false
+    end
+
+    # --- shell (ADR-029) ---------------------------------------------------
+
+    def shell
+      spec[:shell] || spec["shell"] || {}
+    end
+
+    def shell_mode
+      shell[:mode] || shell["mode"] || "eager"
+    end
+
+    def shell_enabled?
+      shell_mode != "disabled"
+    end
+
+    # §2 precedence: spec.shell.replicas is consulted ONLY under lazy. Under
+    # eager the operator holds 1 whatever the field says, so a refcount-driven
+    # 0 can never scale an eager shell down. A paused workspace takes
+    # everything to 0 (ADR-016 §4).
+    def shell_replicas
+      return 0 if paused? || !shell_enabled?
+      return 1 unless shell_mode == "lazy"
+
+      value = shell[:replicas] || shell["replicas"]
+      value.nil? ? 0 : Integer(value).clamp(0, 1)
+    end
+
+    def shell_name
+      "ws-#{project_id}-shell"
+    end
+
+    # StatefulSet ordinal-0 pod. Derivable (nothing publishes it), which is why
+    # the operator can address it by name to force a roll when its image changes.
+    def shell_pod_name
+      "#{shell_name}-0"
+    end
+
+    # Must match CarbideControl::ExecGrant.service_account_name.
+    def exec_service_account_name
+      "ws-#{project_id}-exec"
+    end
+
+    def rails_service_account_name
+      ENV.fetch("RAILS_SERVICE_ACCOUNT", "control-plane-rails")
+    end
+
+    def control_namespace
+      ENV.fetch("CONTROL_NAMESPACE", "carbide-system")
+    end
+
+    def shell_image
+      repo = shell[:imageRepo] || shell["imageRepo"] || "carbide2-shell"
+      tag  = shell[:imageTag]  || shell["imageTag"]  || "dev"
+      "#{repo}:#{tag}"
+    end
+
+    def shell_image_pull_policy
+      shell[:imagePullPolicy] || shell["imagePullPolicy"] || "IfNotPresent"
+    end
+
+    # Falls back to what project_pod.rb hardcoded, so a CR written before the
+    # template gained shell columns still gets the shape it had.
+    def shell_resources
+      r = shell[:resources] || shell["resources"] || {}
+      {
+        requests: {
+          cpu:    r.dig(:requests, :cpu)    || r.dig("requests", "cpu")    || "50m",
+          memory: r.dig(:requests, :memory) || r.dig("requests", "memory") || "128Mi"
+        },
+        limits: {
+          cpu:    r.dig(:limits, :cpu)      || r.dig("limits", "cpu")      || "6",
+          memory: r.dig(:limits, :memory)   || r.dig("limits", "memory")   || "8Gi"
+        }
+      }
+    end
+
+    def shell_labels
+      common_labels.merge(
+        LABEL_NAME     => "carbide2-shell",
+        LABEL_INSTANCE => shell_name
+      )
     end
 
     def common_labels

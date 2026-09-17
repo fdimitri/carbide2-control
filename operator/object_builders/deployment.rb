@@ -51,6 +51,9 @@ module Operator
               },
               spec: {
                 serviceAccountName: ctx.workspace_name,
+                # Only set when a registry pull secret is configured (GitLab).
+                # A self-hosted registry authenticates by CA trust, not a secret.
+                **({ imagePullSecrets: ctx.image_pull_secrets } if ctx.image_pull_secrets),
                 initContainers:     init_containers(ctx),
                 containers: [
                   {
@@ -63,7 +66,12 @@ module Operator
                     ],
                     env: env_vars(ctx, cluster_namespace, cluster_name, creds_secret),
                     volumeMounts: [
-                      { name: "files", mountPath: "/srv/projects" }
+                      { name: "files", mountPath: "/srv/projects" },
+                      {
+                        name:      "control-token",
+                        mountPath: "/var/run/secrets/carbide/control",
+                        readOnly:  true
+                      }
                     ],
                     readinessProbe: {
                       httpGet:             { path: "/up", port: "rails" },
@@ -83,6 +91,24 @@ module Operator
                   {
                     name: "files",
                     persistentVolumeClaim: { claimName: ctx.files_pvc_name }
+                  },
+                  # The worker's identity to control (ADR-029). Audience-scoped
+                  # so the default SA token -- which is accepted by the API
+                  # server -- cannot be replayed at control, and this one cannot
+                  # be replayed at the API server. Projected rather than the
+                  # legacy auto-mount because only projected tokens carry an
+                  # audience, and kubelet rotates them in place.
+                  {
+                    name: "control-token",
+                    projected: {
+                      sources: [{
+                        serviceAccountToken: {
+                          path:              "token",
+                          audience:          "carbide-control",
+                          expirationSeconds: 3600
+                        }
+                      }]
+                    }
                   }
                 ]
               }
@@ -97,7 +123,7 @@ module Operator
           url = git[:cloneUrl] || git["cloneUrl"]
           ref = git[:ref]      || git["ref"] || "main"
           if url && !url.empty?
-            target = "/srv/projects/#{ctx.project_id}"
+            target = "/srv/projects/#{ctx.project_uuid}"
             containers << {
               name:  "git-clone",
               image: "alpine/git:latest",
@@ -167,15 +193,23 @@ module Operator
           # list to tighten per cluster.
           { name: "RAILS_DEV_HOSTS", value: workspace_dev_hosts },
 
-          # Worker shell backend
-          { name: "CARBIDE_BACKEND",            value: "kube" },
-          { name: "CARBIDE_SHELL_IMAGE",        value: ENV.fetch("WORKSPACE_SHELL_IMAGE", "carbide2-shell:dev") },
+          # Worker shell
           { name: "CARBIDE_SHELL_PULL_POLICY",  value: "IfNotPresent" },
           {
             name: "CARBIDE_NAMESPACE",
             valueFrom: { fieldRef: { fieldPath: "metadata.namespace" } }
           },
-          { name: "CARBIDE_PROJECTS_PVC", value: ctx.files_pvc_name }
+          { name: "CARBIDE_PROJECTS_PVC", value: ctx.files_pvc_name },
+
+          # ADR-029: the worker asks control for a shell handle rather than
+          # creating the pod itself, so it needs the control endpoint and the
+          # workspace it is allowed to ask about.
+          { name: "WORKSPACE_ID", value: ctx.project_id.to_s },
+          {
+            name: "CONTROL_URL",
+            value: ENV.fetch("CONTROL_INTERNAL_URL",
+                             "http://control-plane.carbide-system.svc.cluster.local:3001")
+          }
         ]
       end
 

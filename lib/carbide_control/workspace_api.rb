@@ -1,6 +1,9 @@
-# Writes / reads / deletes Workspace Custom Resources. The ONLY way Rails
-# touches Kubernetes. RBAC for the Rails ServiceAccount allows exactly:
-#   create/get/list/watch/delete workspaces.carbide.dev in carbide-system.
+# Writes / reads / deletes Workspace Custom Resources. Rails' primary way of
+# touching Kubernetes: RBAC for the Rails ServiceAccount allows
+#   create/get/list/watch/delete workspaces.carbide.dev in carbide-system,
+# plus the three ADR-029 exceptions that live in Kube / ExecGrant / WorkerAuth
+# / ShellStatus (one named pod GET, a TokenReview, a serviceaccounts/token
+# mint). Nothing else reaches the cluster from Rails.
 #
 # The operator is responsible for everything that happens AFTER the CR is
 # written. Rails reads `.status` for display but never writes it.
@@ -12,29 +15,7 @@ module CarbideControl
     CR_NAMESPACE = ENV.fetch('CONTROL_NAMESPACE', 'carbide-system').freeze
 
     def self.client
-      @client ||= build_client
-    end
-
-    def self.build_client
-      if ENV['KUBERNETES_SERVICE_HOST']
-        # In-cluster: use the mounted ServiceAccount token + CA.
-        Kubeclient::Client.new(
-          "https://#{ENV['KUBERNETES_SERVICE_HOST']}:#{ENV['KUBERNETES_SERVICE_PORT']}/apis/#{GROUP}",
-          VERSION,
-          auth_options: { bearer_token_file: '/var/run/secrets/kubernetes.io/serviceaccount/token' },
-          ssl_options:  { ca_file: '/var/run/secrets/kubernetes.io/serviceaccount/ca.crt' }
-        )
-      else
-        # Out-of-cluster (dev): read ~/.kube/config.
-        config = Kubeclient::Config.read(ENV.fetch('KUBECONFIG', File.expand_path('~/.kube/config')))
-        ctx = config.context
-        Kubeclient::Client.new(
-          "#{ctx.api_endpoint}/apis/#{GROUP}",
-          VERSION,
-          auth_options: ctx.auth_options,
-          ssl_options:  ctx.ssl_options
-        )
-      end
+      @client ||= Kube.client("/apis/#{GROUP}", VERSION)
     end
 
     # Build the Workspace CR spec from a ControlProject. The operator only
@@ -79,6 +60,8 @@ module CarbideControl
       template_resources = project.template&.resources
       spec[:resources] = template_resources if template_resources.present?
 
+      spec[:shell] = shell_spec_for(project)
+
       {
         apiVersion: "#{GROUP}/#{VERSION}",
         kind:       'Workspace',
@@ -89,6 +72,21 @@ module CarbideControl
         },
         spec: spec,
       }
+    end
+
+    # ADR-029 §2. `replicas` is the applied projection of the durable intent
+    # column, not a user field; the operator ignores it unless mode is lazy.
+    def self.shell_spec_for(project)
+      shell = {
+        mode:            project.shell_mode,
+        replicas:        project.shell_replicas.to_i,
+        imageRepo:       project.effective_shell_image_repo,
+        imageTag:        project.effective_shell_image_tag,
+        imagePullPolicy: ENV.fetch('WORKSPACE_SHELL_PULL_POLICY', 'IfNotPresent')
+      }
+      resources = project.template&.shell_resources
+      shell[:resources] = resources if resources.present?
+      shell
     end
 
     def self.create(project)
