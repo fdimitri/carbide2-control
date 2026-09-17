@@ -6,10 +6,12 @@
 # Layering, which the column names alone do not make obvious:
 #   shell_terminals / shell_last_report_at / shell_idle_since  — durable input
 #   shell_replicas                                             — derived intent
+#   shell_replicas_applied                                     — last value written to the CR
 #   spec.shell.replicas                                        — applied output
 #
-# The CR is written only on an intent TRANSITION, so a heartbeating worker does
-# not produce a CR write per report.
+# The CR is written when the applied value falls out of step with the intent,
+# which in the steady state means only on an intent TRANSITION — so a
+# heartbeating worker does not produce a CR write per report.
 class ShellLifecycle
   class << self
     # A worker report: terminal create/destroy, or a periodic keep-alive.
@@ -60,6 +62,13 @@ class ShellLifecycle
             # disabled -> lazy creates the object at lazy's default of 0;
             # eager -> lazy leaves a running shell up until the timeout.
             p.shell_replicas = 0 if previous == 'disabled'
+            # eager -> lazy does not touch replicas, so the value carries over.
+            # A running eager shell is at 1 and stays up until the sweep's idle
+            # timeout. An eager row already at 0 (a shell that was never up)
+            # tears down ON the flip instead: the mode patch carries replicas 0,
+            # the operator honors it under lazy, and the sweep never sees the
+            # row (its scope is replicas 1). That is the intended outcome — no
+            # terminals, now lazy, so nothing should be up.
           end
         when 'eager'
           # Belt-and-braces; the operator holds 1 under eager regardless.
@@ -143,8 +152,8 @@ class ShellLifecycle
       Time.current - last > project.effective_shell_max_report_time
     end
 
-    # Runs the block against a locked row, then stamps the CR only if the
-    # intent actually moved. Returns true when the intent changed.
+    # Runs the block against a locked row, then brings the CR in line with the
+    # intent. Returns true when the intent changed.
     def apply(project)
       transitioned = false
 
@@ -155,18 +164,32 @@ class ShellLifecycle
         transitioned = project.shell_replicas != before
       end
 
-      stamp_replicas(project) if transitioned
+      stamp_replicas(project)
       transitioned
     end
 
+    # Stamps whenever the applied projection is out of step with the intent, not
+    # only when the intent moved. A failed patch leaves shell_replicas_applied
+    # stale, so the next report (the 60s heartbeat) retries; gating on the
+    # transition alone meant a single failed patch stuck the workspace until an
+    # unrelated intent change — which, for a lazy cold start, never comes. In
+    # the steady state the guard makes this a no-op.
     def stamp_replicas(project)
-      CarbideControl::WorkspaceApi.merge_patch(
-        project, spec: { shell: { replicas: project.shell_replicas.to_i } }
-      )
-    rescue StandardError => e
-      # The DB intent is the durable value; the next transition or a manual
-      # re-apply restamps. Failing the worker's request over this would be worse.
-      Rails.logger.error("[ShellLifecycle] CR stamp failed for ws-#{project.id}: #{e.message}")
+      return if project.shell_replicas_applied == project.shell_replicas
+
+      begin
+        CarbideControl::WorkspaceApi.merge_patch(
+          project, spec: { shell: { replicas: project.shell_replicas.to_i } }
+        )
+      rescue StandardError => e
+        # shell_replicas_applied is deliberately left unchanged so the next
+        # apply retries. The DB intent is the durable value, and failing the
+        # worker's report over a stale CR would be worse.
+        Rails.logger.error("[ShellLifecycle] CR stamp failed for ws-#{project.id}: #{e.message}")
+        return
+      end
+
+      project.update_column(:shell_replicas_applied, project.shell_replicas)
     end
   end
 end
