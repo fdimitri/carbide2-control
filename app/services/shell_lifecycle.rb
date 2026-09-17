@@ -66,9 +66,9 @@ class ShellLifecycle
             # A running eager shell is at 1 and stays up until the sweep's idle
             # timeout. An eager row already at 0 (a shell that was never up)
             # tears down ON the flip instead: the mode patch carries replicas 0,
-            # the operator honors it under lazy, and the sweep never sees the
-            # row (its scope is replicas 1). That is the intended outcome — no
-            # terminals, now lazy, so nothing should be up.
+            # the operator honors it under lazy, and the sweep does not act on
+            # the row. That is the intended outcome — no terminals, now lazy, so
+            # nothing should be up.
           end
         when 'eager'
           # Belt-and-braces; the operator holds 1 under eager regardless.
@@ -81,7 +81,13 @@ class ShellLifecycle
     # replica runs its own, staggered by SHELL_SWEEP_OFFSET. Redundant passes
     # are idempotent.
     def sweep!(logger: Rails.logger)
-      scope = ControlProject.where(shell_mode: 'lazy', shell_replicas: 1)
+      # Rows needing a scale-down decision, plus rows whose CR projection did
+      # not land. The second clause is what retries a failed stamp on the
+      # dead-worker path: intent goes to 0 there, so `shell_replicas = 1` stops
+      # matching, and no report arrives to drive the retry through apply.
+      scope = ControlProject.where(shell_mode: 'lazy')
+                            .where('shell_replicas = 1 ' \
+                                   'OR shell_replicas_applied IS DISTINCT FROM shell_replicas')
       scaled = 0
 
       scope.pluck(:id).each do |id|
